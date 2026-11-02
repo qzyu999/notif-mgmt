@@ -4,6 +4,7 @@ Gmail and the Meta API are intentionally not connected yet (A2/A4).
 """
 import argparse
 import json
+import os
 from pathlib import Path
 
 from .models import InboundEvent
@@ -12,6 +13,7 @@ from .storage import (
     assign_signal_person,
     connect,
     create_person,
+    get_sync_state,
     link_identity,
     list_followups,
     list_people,
@@ -29,8 +31,17 @@ def _person_label(db, person_id: int | None) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Local-first notification CRM")
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("demo", "list", "people", "signals", "followups", "today"):
+    for name in ("demo", "list", "people", "signals", "followups", "today", "status"):
         sub.add_parser(name).add_argument("--db", default="./dev.db")
+    auth = sub.add_parser("auth")
+    auth.add_argument("--db", default="./dev.db")
+    auth.add_argument("--credentials", default=None,
+                      help="OAuth client JSON (default: $GMAIL_OAUTH_CLIENT_JSON or ./credentials.json)")
+    sync = sub.add_parser("sync")
+    sync.add_argument("--db", default="./dev.db")
+    sync.add_argument("--account", required=True)
+    sync.add_argument("--query", default=None,
+                      help="Initial-sync Gmail query (default: $GMAIL_INITIAL_QUERY or newer_than:30d)")
     add_person = sub.add_parser("add-person")
     add_person.add_argument("--db", default="./dev.db")
     add_person.add_argument("--name", required=True)
@@ -91,6 +102,59 @@ def main() -> None:
     elif args.command == "assign-signal":
         assign_signal_person(db, args.signal, args.person)
         print(f"Assigned signal {args.signal} to person {args.person}")
+    elif args.command == "auth":
+        from .gmail import authorize
+        from .token_store import default_token_store
+
+        credentials = (args.credentials or os.environ.get("GMAIL_OAUTH_CLIENT_JSON")
+                       or "./credentials.json")
+        try:
+            account = authorize(default_token_store(), credentials)
+        except ImportError:
+            print("Gmail libraries not installed; run: python -m pip install -e '.[gmail]'")
+            return
+        print(f"Authorized {account} (read-only). Credentials stored in the token store.")
+    elif args.command == "sync":
+        from .gmail import GmailAuthError, GmailConnector, GmailSyncError, build_api_transport
+        from .token_store import default_token_store
+
+        token = default_token_store().load(args.account)
+        if not token:
+            print(f"No stored credentials for {args.account}; run: notif-mgmt auth")
+            return
+        try:
+            transport = build_api_transport(token)
+        except ImportError:
+            print("Gmail libraries not installed; run: python -m pip install -e '.[gmail]'")
+            return
+        connector = GmailConnector(
+            db, transport, account_id=args.account,
+            recovery_days=int(os.environ.get("GMAIL_RECOVERY_DAYS", "30")))
+        state = get_sync_state(db, "gmail", args.account)
+        try:
+            if state is not None and state["cursor"]:
+                result = connector.sync_incremental()
+            else:
+                query = (args.query or os.environ.get("GMAIL_INITIAL_QUERY")
+                         or "newer_than:30d")
+                result = connector.sync_initial(query=query)
+        except (GmailAuthError, GmailSyncError) as error:
+            print(f"Sync failed: {error}")
+            raise SystemExit(1) from error
+        print(f"Sync complete: fetched={result.fetched} new={result.inserted} "
+              f"duplicates={result.duplicates} deleted={result.deleted} "
+              f"recovered={result.recovered}")
+    elif args.command == "status":
+        rows = db.execute("SELECT * FROM sync_state ORDER BY source, account_id").fetchall()
+        if not rows:
+            print("No sync state yet. Run: notif-mgmt auth, then notif-mgmt sync --account <email>")
+        for row in rows:
+            gaps = db.execute(
+                "SELECT count(*) FROM sync_gaps WHERE source=? AND account_id=?",
+                (row["source"], row["account_id"])).fetchone()[0]
+            print(f"{row['source']} {row['account_id']}: cursor={row['cursor']} "
+                  f"last_sync={row['last_sync_completed_at']} "
+                  f"last_error={row['last_error_code']} gaps={gaps}")
 
 
 if __name__ == "__main__":

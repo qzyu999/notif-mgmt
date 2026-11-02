@@ -9,6 +9,7 @@ import re
 from pydantic import BaseModel
 
 from .classify import _SOCIAL_HINTS, classify
+from .config import excerpt_chars
 from .models import InboundEvent
 
 PARSER_NAME = "notification-rules"
@@ -51,7 +52,7 @@ def _actor_from_subject(subject: str) -> str | None:
 
 def parse_notification(event: InboundEvent) -> ParsedNotification:
     triage = classify(event)
-    summary = (event.preview or event.subject)[:200]
+    summary = (event.preview or event.subject)[:excerpt_chars()]
     if triage.category == "other_email":
         match = _EMAIL_RE.search(event.sender)
         address = (match.group(1) or match.group(2)) if match else None

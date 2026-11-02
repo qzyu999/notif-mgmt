@@ -4,9 +4,10 @@ import sqlite3
 from pathlib import Path
 
 from .classify import classify
+from .config import excerpt_chars
 from .models import FollowUp, InboundEvent, InteractionSignal, Person, PlatformIdentity
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 SCHEMA = """
@@ -155,6 +156,58 @@ def _migrate(db: sqlite3.Connection) -> None:
             """INSERT OR IGNORE INTO sync_state (source, account_id, cursor, updated_at)
                SELECT source, 'default', cursor, updated_at FROM sync_cursors""")
         db.execute("PRAGMA user_version = 2")
+    if version < 3:
+        # v3 (A2): account-scoped source events + explicit sync-gap records.
+        db.execute("PRAGMA foreign_keys = OFF")
+        if "account_id" not in _table_columns(db, "inbound_events"):
+            db.executescript("""
+                CREATE TABLE inbound_events_v3 (
+                  id INTEGER PRIMARY KEY,
+                  source TEXT NOT NULL,
+                  external_id TEXT NOT NULL,
+                  account_id TEXT NOT NULL DEFAULT 'default',
+                  sender TEXT NOT NULL,
+                  subject TEXT NOT NULL,
+                  preview TEXT NOT NULL,
+                  received_at TEXT NOT NULL,
+                  platform TEXT,
+                  thread_id TEXT,
+                  conversation_url TEXT,
+                  category TEXT NOT NULL,
+                  priority TEXT NOT NULL,
+                  state TEXT NOT NULL,
+                  classification_reason TEXT NOT NULL,
+                  classification_confidence REAL NOT NULL,
+                  inserted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+                  UNIQUE(source, account_id, external_id)
+                );
+                INSERT INTO inbound_events_v3
+                  (id, source, external_id, sender, subject, preview, received_at,
+                   platform, thread_id, conversation_url, category, priority, state,
+                   classification_reason, classification_confidence, inserted_at)
+                SELECT id, source, external_id, sender, subject, preview, received_at,
+                   platform, thread_id, conversation_url, category, priority, state,
+                   classification_reason, classification_confidence, inserted_at
+                FROM inbound_events;
+                DROP TABLE inbound_events;
+                ALTER TABLE inbound_events_v3 RENAME TO inbound_events;
+            """)
+        db.executescript("""
+            CREATE TABLE IF NOT EXISTS sync_gaps (
+              id INTEGER PRIMARY KEY,
+              source TEXT NOT NULL,
+              account_id TEXT NOT NULL,
+              old_cursor TEXT,
+              new_cursor TEXT,
+              recovery_query TEXT,
+              detected_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+        """)
+        db.execute("PRAGMA foreign_keys = ON")
+        violations = db.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise RuntimeError(f"foreign_key_check failed after v3 migration: {violations}")
+        db.execute("PRAGMA user_version = 3")
     db.commit()
 
 
@@ -175,12 +228,12 @@ def store_event(db: sqlite3.Connection, event: InboundEvent) -> bool:
     with db:
         cursor = db.execute(
             """INSERT OR IGNORE INTO inbound_events
-            (source, external_id, sender, subject, preview, received_at, platform,
+            (source, external_id, account_id, sender, subject, preview, received_at, platform,
              thread_id, conversation_url, category, priority, state,
              classification_reason, classification_confidence)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (event.source, event.external_id, event.sender, event.subject,
-             event.preview, event.received_at, event.platform, event.thread_id,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (event.source, event.external_id, event.account_id, event.sender, event.subject,
+             event.preview[:excerpt_chars()], event.received_at, event.platform, event.thread_id,
              event.conversation_url, result.category, result.priority, result.state,
              result.reason, result.confidence),
         )
@@ -188,24 +241,27 @@ def store_event(db: sqlite3.Connection, event: InboundEvent) -> bool:
 
 
 def commit_events_and_cursor(
-    db: sqlite3.Connection, source: str, events: list[InboundEvent], cursor: str
+    db: sqlite3.Connection, source: str, events: list[InboundEvent], cursor: str,
+    account_id: str = "default",
 ) -> int:
-    """Atomic batch: records and source cursor are committed or rolled back together."""
+    """Atomic batch: records and account cursor are committed or rolled back together."""
     inserted = 0
     with db:
         for event in events:
             if event.source != source:
                 raise ValueError("Mixed event sources in one cursor commit")
+            if event.account_id != account_id:
+                raise ValueError("Event account does not match cursor account")
             triage = classify(event)
             row = db.execute(
                 """INSERT OR IGNORE INTO inbound_events
-                (source, external_id, sender, subject, preview, received_at, platform,
+                (source, external_id, account_id, sender, subject, preview, received_at, platform,
                  thread_id, conversation_url, category, priority, state,
                  classification_reason, classification_confidence)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (event.source, event.external_id, event.sender, event.subject,
-                 event.preview, event.received_at, event.platform, event.thread_id,
-                 event.conversation_url, triage.category, triage.priority,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (event.source, event.external_id, event.account_id, event.sender, event.subject,
+                 event.preview[:excerpt_chars()], event.received_at, event.platform,
+                 event.thread_id, event.conversation_url, triage.category, triage.priority,
                  triage.state, triage.reason, triage.confidence),
             )
             inserted += int(row.rowcount == 1)
@@ -217,13 +273,65 @@ def commit_events_and_cursor(
         )
         db.execute(
             """INSERT INTO sync_state(source, account_id, cursor, last_sync_completed_at)
-               VALUES (?, 'default', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+               VALUES (?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
                ON CONFLICT(source, account_id) DO UPDATE SET cursor=excluded.cursor,
                last_sync_completed_at=excluded.last_sync_completed_at,
+               last_error_code=NULL, last_error_message=NULL,
                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')""",
-            (source, cursor),
+            (source, account_id, cursor),
         )
     return inserted
+
+
+# --- A2 sync-state helpers -----------------------------------------------------
+
+
+def get_sync_state(db: sqlite3.Connection, source: str, account_id: str) -> sqlite3.Row | None:
+    return db.execute(
+        "SELECT * FROM sync_state WHERE source=? AND account_id=?",
+        (source, account_id)).fetchone()
+
+
+def record_sync_error(db: sqlite3.Connection, source: str, account_id: str,
+                      code: str, message: str) -> None:
+    """Persist sync error metadata (never message bodies) without moving a cursor."""
+    with db:
+        db.execute(
+            """INSERT INTO sync_state (source, account_id, last_error_code, last_error_message)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(source, account_id) DO UPDATE SET
+               last_error_code=excluded.last_error_code,
+               last_error_message=excluded.last_error_message,
+               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')""",
+            (source, account_id, code, message[:200]))
+
+
+def record_sync_gap(db: sqlite3.Connection, source: str, account_id: str,
+                    old_cursor: str | None, new_cursor: str, recovery_query: str) -> None:
+    """Record a potential synchronization gap from bounded cursor recovery."""
+    with db:
+        db.execute(
+            """INSERT INTO sync_gaps (source, account_id, old_cursor, new_cursor, recovery_query)
+               VALUES (?, ?, ?, ?, ?)""",
+            (source, account_id, old_cursor, new_cursor, recovery_query))
+        db.execute(
+            """UPDATE sync_state SET last_recovery_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+               WHERE source=? AND account_id=?""",
+            (source, account_id))
+
+
+def withdraw_signals_for_source_event(db: sqlite3.Connection, source: str,
+                                      account_id: str, external_id: str) -> int:
+    """Mark signals from a deleted source item withdrawn (evidence is kept)."""
+    with db:
+        cur = db.execute(
+            """UPDATE interaction_signals SET status='withdrawn'
+               WHERE status='active' AND source_event_id IN
+                 (SELECT id FROM inbound_events
+                  WHERE source=? AND account_id=? AND external_id=?)""",
+            (source, account_id, external_id))
+        return cur.rowcount
 
 
 # --- A1 repositories: people, identities, signals, follow-ups -----------------

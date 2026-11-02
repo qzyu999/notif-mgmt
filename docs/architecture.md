@@ -22,14 +22,15 @@ flowchart TD
 
 **Person / Entity → Platform Identities → Interaction Signals → Follow-ups**
 
-- **SourceEvent** (table `inbound_events`, evidence): `(source, account_id, external_id)` unique; provenance, sender, subject, capped excerpt, timestamps. Immutable; never carries inferred state. (Account scoping lands with the Gmail connector in A2; `sync_state` is already account-keyed.)
+- **SourceEvent** (table `inbound_events`, evidence): `(source, account_id, external_id)` unique; provenance, sender, subject, capped excerpt (default 200 chars, `NOTIF_MGMT_EXCERPT_CHARS`), timestamps. Immutable; never carries inferred state.
+- **SyncGap** (`sync_gaps`): explicit record of a potential gap created by bounded expired-cursor recovery (old/new cursor, recovery query, timestamp).
 - **Person** (`people`): one human/org/unknown entity; display name, lightweight relationship notes.
 - **Identity** (`identities`): an exact observed identifier (email, handle) on a platform. `person_id` is nullable — an identity exists *before* resolution. `match_status`: `unmatched | suggested | verified | rejected`; `match_method` and `confidence` record how it was linked.
 - **InteractionSignal** (`interaction_signals`): a deduplicated interpretation of one source event — platform, kind (`direct_message_notification`, `platform_activity`, `direct_email`), `occurred_at`, short summary, parser name/version, confidence, and an optional `actor_candidate`. An actor candidate is a display name only; it is **not** an identity and never creates a person by itself.
 - **FollowUp** (`followups`): kind (`review | reply | waiting | follow_up`) × status (`open | snoozed | done | dismissed`), optional person/signal links, due/snooze fields, `created_by` (`rule | llm | user`).
 - **SyncState** (`sync_state`): per `(source, account_id)` cursor, last success, last error metadata, recovery marker. The legacy `sync_cursors` table is still written for compatibility.
 
-Schema is versioned with `PRAGMA user_version` (current: **2**); migrations preserve existing data (v1 `followups` rows are renamed to `followups_v1`, cursors are copied into `sync_state`).
+Schema is versioned with `PRAGMA user_version` (current: **3**); migrations preserve existing data (v1 `followups` rows are renamed to `followups_v1`, cursors are copied into `sync_state`, v3 rebuilds `inbound_events` account-scoped with foreign-key integrity verified).
 
 ## Identity resolution (minimal, A1)
 
@@ -47,7 +48,7 @@ Deferred until needed: suggested matches, reversible merge workflows, cross-plat
 - All data is exportable and deletable, with a self-hostable persistence layer.
 - No agent writes to Gmail or social platforms. Read-only ingestion only.
 
-## Gmail design (A2, not yet implemented)
+## Gmail design (A2, implemented against a fake transport; live OAuth pending approval)
 
 1. OAuth installed desktop app, `gmail.readonly` scope, token stored in OS protected secret store or local file with strict permissions; don't commit credentials.
 2. Initial sync via `users.messages.list` with explicit user query and bounded date range, fetch details selectively. Persist Gmail `historyId` from `users.getProfile` at a deliberate safe point; handle messages arriving during initial backfill with overlap + idempotent replay.

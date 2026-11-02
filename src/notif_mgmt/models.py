@@ -14,6 +14,7 @@ class InboundEvent:
     platform: str | None = None
     thread_id: str | None = None
     conversation_url: str | None = None
+    account_id: str = "default"  # owning account/mailbox; scopes (source, external_id)
 
 
 @dataclass(frozen=True)

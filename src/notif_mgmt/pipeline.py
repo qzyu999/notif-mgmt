@@ -20,8 +20,8 @@ def process_event(db: sqlite3.Connection, event: InboundEvent) -> InteractionSig
     """
     store_event(db, event)
     row = db.execute(
-        "SELECT id FROM inbound_events WHERE source=? AND external_id=?",
-        (event.source, event.external_id)).fetchone()
+        "SELECT id FROM inbound_events WHERE source=? AND account_id=? AND external_id=?",
+        (event.source, event.account_id, event.external_id)).fetchone()
     parsed = parse_notification(event)
     identity_id = person_id = None
     if parsed.identity is not None:
@@ -33,10 +33,36 @@ def process_event(db: sqlite3.Connection, event: InboundEvent) -> InteractionSig
             confidence=parsed.confidence)
         identity_id = identity.id
         person_id = identity.person_id  # set only on an exact/manual prior link
-    dedupe_key = f"{event.source}:{event.external_id}:{parsed.parser_name}@{parsed.parser_version}"
+    dedupe_key = (f"{event.source}:{event.account_id}:{event.external_id}:"
+                  f"{parsed.parser_name}@{parsed.parser_version}")
     return insert_signal(
         db, source_event_id=row["id"], identity_id=identity_id, person_id=person_id,
         platform=parsed.platform, kind=parsed.kind, occurred_at=event.received_at,
         summary=parsed.summary, actor_candidate=parsed.actor_candidate,
         confidence=parsed.confidence, parser_name=parsed.parser_name,
         parser_version=parsed.parser_version, dedupe_key=dedupe_key)
+
+
+def process_unprocessed_events(db: sqlite3.Connection, *, source: str,
+                               account_id: str) -> int:
+    """Derive signals for stored events that have none yet (crash self-healing).
+
+    Signal derivation is idempotent, so a crash between the atomic
+    event+cursor commit and signal creation is repaired by the next sync.
+    """
+    rows = db.execute(
+        """SELECT e.* FROM inbound_events e
+           WHERE e.source=? AND e.account_id=? AND NOT EXISTS
+             (SELECT 1 FROM interaction_signals s WHERE s.source_event_id = e.id)
+           ORDER BY e.id""",
+        (source, account_id)).fetchall()
+    created = 0
+    for row in rows:
+        event = InboundEvent(
+            source=row["source"], external_id=row["external_id"],
+            sender=row["sender"], subject=row["subject"], preview=row["preview"],
+            received_at=row["received_at"], platform=row["platform"],
+            thread_id=row["thread_id"], conversation_url=row["conversation_url"],
+            account_id=row["account_id"])
+        created += int(process_event(db, event) is not None)
+    return created

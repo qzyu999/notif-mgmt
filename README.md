@@ -4,7 +4,7 @@ Local-first AI relationship and notification manager. Its first ingestion source
 
 ## Project status
 
-Phase A (functionality first). **M0 + A1 implemented and verified (2026-11-02):** versioned SQLite schema (v2), the canonical **Person → Platform Identities → Interaction Signals → Follow-ups** model, deterministic parsing of synthetic Gmail notification fixtures into interaction signals and review candidates, and minimal identity resolution (unresolved identities, exact email/handle matching, manual linking). **Evidence:** `pytest` 17 passed, `ruff check src tests` clean; CLI demo on a temp DB inserted 3 signals + 3 review candidates, and a replay inserted 0 (idempotent). Gmail OAuth (A2, in progress with a fake transport first), LLM enrichment (A4), and the web UI (A5) are not connected yet. No elaborate visual design until Phase B.
+Phase A (functionality first). **M0 + A1 implemented and verified (2026-11-02):** versioned SQLite schema (v2), the canonical **Person → Platform Identities → Interaction Signals → Follow-ups** model, deterministic parsing of synthetic Gmail notification fixtures into interaction signals and review candidates, and minimal identity resolution (unresolved identities, exact email/handle matching, manual linking). **Evidence:** `pytest` 17 passed, `ruff check src tests` clean; CLI demo on a temp DB inserted 3 signals + 3 review candidates, and a replay inserted 0 (idempotent). **A2 implemented and verified against a fake Gmail transport (2026-11-02):** schema v3 with account-scoped source events, Keychain/0600 token stores, incremental sync with transactional cursor, bounded expired-cursor recovery with recorded sync gaps, excerpt cap (37 tests passed total). No real Gmail account has been connected yet; LLM enrichment (A4) and the web UI (A5) are not started. No elaborate visual design until Phase B.
 
 ## Goals
 
@@ -42,7 +42,7 @@ notif-mgmt people --db ./dev.db
 Phase A — working product (vertical slices, functionality first):
 
 1. **M0/A1 (done):** spec reset; canonical people/identities/signals/follow-ups schema with versioned migrations; deterministic fixture pipeline; minimal identity resolution (unresolved, exact match, manual link — no name-only merging, no merge workflows yet); CLI views.
-2. **A2 — Gmail connector:** single-user local OAuth, `gmail.readonly`, initial scoped backfill, 5-minute incremental sync, `historyId` persistence, 404 resync recovery, rate limits, errors, zero duplicate actions. All network access behind a fakeable transport.
+2. **A2 — Gmail connector (done, fake transport; live OAuth pending approval):** single-user local OAuth, `gmail.readonly`, initial scoped backfill, incremental sync, `historyId` persistence, 404 bounded recovery with recorded gaps, rate limits, errors, zero duplicate actions. All network access behind a fakeable transport; Keychain token storage with 0600 fallback.
 3. **A3 — Parser registry:** versioned deterministic parsers (LinkedIn/X/Reddit/Instagram/Xiaohongshu/direct email) with a precision/recall fixture corpus.
 4. **A4 — Optional AI classifier:** opt-in Meta Muse adapter behind a vendor-neutral interface; typed JSON schema, confidence, evidence/provenance, safeguards for private message content, budget caps, rule-only/local fallback. Disabled by default.
 5. **A5 — Minimal web app:** FastAPI + React/TypeScript/Vite with Today, People, Follow-ups, and Sources views; semantic design tokens, accessible/responsive, no elaborate styling yet.
