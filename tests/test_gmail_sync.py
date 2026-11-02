@@ -17,10 +17,10 @@ from notif_mgmt.storage import connect, get_sync_state, list_signals
 ACCOUNT = "me@example.invalid"
 
 
-def msg(mid, sender, subject, snippet, ts_ms="1793400000000", thread=None):
+def msg(mid, sender, subject, snippet, ts_ms="1793400000000", thread=None, labels=None):
     return {
         "id": mid, "threadId": thread or f"t-{mid}", "internalDate": ts_ms,
-        "snippet": snippet,
+        "snippet": snippet, "labelIds": labels or ["INBOX"],
         "payload": {"headers": [
             {"name": "From", "value": sender},
             {"name": "Subject", "value": subject},
@@ -31,8 +31,9 @@ def msg(mid, sender, subject, snippet, ts_ms="1793400000000", thread=None):
 class FakeTransport:
     """Gmail-shaped fake. `errors[method]` is a queue of exceptions to raise."""
 
-    def __init__(self, messages, history_id="100"):
+    def __init__(self, messages, history_id="100", ghost_ids=()):
         self.messages = {m["id"]: m for m in messages}
+        self.ghost_ids = list(ghost_ids)
         self.history_id = history_id
         self.history_pages = []   # list of (changes, history_id)
         self.errors = {}
@@ -51,7 +52,7 @@ class FakeTransport:
     def list_message_ids(self, query, page_token=None):
         self.calls.append(("list_message_ids", query, page_token))
         self._maybe_raise("list_message_ids")
-        ids = sorted(self.messages)
+        ids = sorted(self.messages) + self.ghost_ids
         page = int(page_token or 0)
         chunk = ids[page * 2:(page + 1) * 2]  # page size 2 to force pagination
         result = {"messages": [{"id": i} for i in chunk]}
@@ -72,6 +73,8 @@ class FakeTransport:
     def get_message(self, message_id):
         self.calls.append(("get_message", message_id))
         self._maybe_raise("get_message")
+        if message_id not in self.messages:
+            raise GmailApiError(404, "message deleted before fetch")
         return self.messages[message_id]
 
 
@@ -194,3 +197,53 @@ def test_incremental_without_initial_sync_fails(tmp_path):
     db = connect(tmp_path / "app.db")
     with pytest.raises(GmailSyncError):
         connector(db, FakeTransport([])).sync_incremental()
+
+
+def test_message_deleted_between_list_and_fetch_is_skipped(tmp_path):
+    db = connect(tmp_path / "app.db")
+    transport = FakeTransport(three_messages(), ghost_ids=["ghost-1"])
+    result = connector(db, transport).sync_initial(query="newer_than:30d")
+    assert result.inserted == 3
+    assert get_sync_state(db, "gmail", ACCOUNT)["cursor"] == "100"
+
+
+def test_incremental_added_message_already_deleted_does_not_poison_cursor(tmp_path):
+    db = connect(tmp_path / "app.db")
+    transport = FakeTransport(three_messages())
+    conn = connector(db, transport)
+    conn.sync_initial(query="newer_than:30d")
+    transport.history_pages = [
+        ([{"messagesAdded": [{"message": {"id": "ghost-9"}}]}], "106"),
+    ]
+    result = conn.sync_incremental()
+    assert result.inserted == 0
+    assert get_sync_state(db, "gmail", ACCOUNT)["cursor"] == "106"
+
+
+def test_quota_403_is_retried_instead_of_demanding_reauth(tmp_path):
+    db = connect(tmp_path / "app.db")
+    transport = FakeTransport(three_messages())
+    transport.errors["list_message_ids"] = [
+        GmailApiError(403, "quota", reason="rateLimitExceeded")]
+    result = connector(db, transport).sync_initial(query="newer_than:30d")
+    assert result.inserted == 3
+
+
+def test_permission_403_is_an_auth_error(tmp_path):
+    db = connect(tmp_path / "app.db")
+    transport = FakeTransport(three_messages())
+    transport.errors["list_message_ids"] = [
+        GmailApiError(403, "forbidden", reason="insufficientPermissions")]
+    with pytest.raises(GmailAuthError):
+        connector(db, transport).sync_initial(query="newer_than:30d")
+
+
+def test_sent_and_draft_messages_are_not_ingested(tmp_path):
+    db = connect(tmp_path / "app.db")
+    messages = three_messages() + [
+        msg("m8", "Me <me@example.invalid>", "Sent note", "outgoing", labels=["SENT"]),
+        msg("m9", "Me <me@example.invalid>", "Draft note", "unsent", labels=["DRAFT"]),
+    ]
+    result = connector(db, FakeTransport(messages)).sync_initial(query="newer_than:30d")
+    assert result.inserted == 3
+    assert db.execute("SELECT count(*) FROM inbound_events").fetchone()[0] == 3

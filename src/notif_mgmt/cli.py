@@ -111,21 +111,31 @@ def main() -> None:
         try:
             account = authorize(default_token_store(), credentials)
         except ImportError:
-            print("Gmail libraries not installed; run: python -m pip install -e '.[gmail]'")
+            print("Gmail libraries not installed; run python -m pip install -e '.[gmail]'")
             return
+        except Exception as error:
+            print(f"Authorization failed {error}")
+            raise SystemExit(1) from error
         print(f"Authorized {account} (read-only). Credentials stored in the token store.")
     elif args.command == "sync":
         from .gmail import GmailAuthError, GmailConnector, GmailSyncError, build_api_transport
         from .token_store import default_token_store
 
-        token = default_token_store().load(args.account)
+        try:
+            token = default_token_store().load(args.account)
+        except ValueError as error:
+            print(f"Stored credentials are unusable {error}; run notif-mgmt auth again")
+            return
         if not token:
-            print(f"No stored credentials for {args.account}; run: notif-mgmt auth")
+            print(f"No stored credentials for {args.account}; run notif-mgmt auth")
             return
         try:
             transport = build_api_transport(token)
         except ImportError:
-            print("Gmail libraries not installed; run: python -m pip install -e '.[gmail]'")
+            print("Gmail libraries not installed; run python -m pip install -e '.[gmail]'")
+            return
+        except (ValueError, KeyError, TypeError) as error:
+            print(f"Stored credentials are invalid {error}; run notif-mgmt auth again")
             return
         connector = GmailConnector(
             db, transport, account_id=args.account,

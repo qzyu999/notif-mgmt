@@ -31,9 +31,13 @@ SOURCE = "gmail"
 class GmailApiError(Exception):
     """Transport-level Gmail API failure with an HTTP status."""
 
-    def __init__(self, status: int, message: str = ""):
+    def __init__(self, status, message="", reason=None):
         super().__init__(message or f"Gmail API error {status}")
         self.status = status
+        self.reason = reason
+
+
+_QUOTA_REASONS = {"rateLimitExceeded", "userRateLimitExceeded", "quotaExceeded"}
 
 
 class GmailAuthError(Exception):
@@ -82,13 +86,16 @@ class GmailConnector:
             try:
                 return fn(*args)
             except GmailApiError as error:
-                if error.status in (401, 403):
+                quota = error.status == 429 or (
+                    error.status == 403 and error.reason in _QUOTA_REASONS)
+                if error.status == 401 or (error.status == 403 and not quota):
                     raise GmailAuthError(
                         f"Gmail authorization failed (HTTP {error.status}); "
                         "reauthentication required") from error
                 if error.status == 404:
-                    raise  # callers decide (expired history cursor)
-                if error.status in (429, 500, 502, 503, 504) and attempt < self.max_retries:
+                    raise  # callers decide (expired history cursor or deleted message)
+                retryable = quota or error.status in (500, 502, 503, 504)
+                if retryable and attempt < self.max_retries:
                     self.sleeper(min(2 ** attempt, 8))
                     attempt += 1
                     continue
@@ -114,9 +121,20 @@ class GmailConnector:
             conversation_url=f"https://mail.google.com/mail/u/0/#inbox/{raw['id']}",
             account_id=self.account_id)
 
-    def _fetch_events(self, message_ids: list[str]) -> list[InboundEvent]:
-        return [self._to_event(self._call(self.transport.get_message, mid))
-                for mid in message_ids]
+    def _fetch_events(self, message_ids):
+        events = []
+        for mid in message_ids:
+            try:
+                raw = self._call(self.transport.get_message, mid)
+            except GmailApiError as error:
+                if error.status == 404:
+                    continue  # deleted between listing and fetch; not an error
+                raise
+            labels = set(raw.get("labelIds") or [])
+            if labels & {"SENT", "DRAFT"}:
+                continue  # the user's own mail is not an inbound interaction
+            events.append(self._to_event(raw))
+        return events
 
     def _list_all_ids(self, query: str) -> list[str]:
         ids, token = [], None
@@ -198,6 +216,7 @@ class GmailConnector:
 
 def build_api_transport(credentials_json: str):
     """Construct the real Gmail API transport from stored credentials JSON."""
+    from google.auth.exceptions import RefreshError
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
@@ -211,8 +230,18 @@ def build_api_transport(credentials_json: str):
         def _execute(self, request):
             try:
                 return request.execute()
+            except RefreshError as error:
+                # A revoked or expired grant must surface as an auth failure
+                # the connector understands, not as a traceback.
+                raise GmailApiError(401, f"credentials refresh failed {error}") from error
             except HttpError as error:
-                raise GmailApiError(error.resp.status, str(error)) from error
+                reason = None
+                try:
+                    payload = json.loads(error.content or b"{}")
+                    reason = payload["error"]["errors"][0].get("reason")
+                except (ValueError, KeyError, IndexError, TypeError):
+                    reason = None
+                raise GmailApiError(error.resp.status, str(error), reason=reason) from error
 
         def get_profile(self):
             return self._execute(self.service.users().getProfile(userId="me"))

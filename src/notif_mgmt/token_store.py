@@ -22,7 +22,11 @@ class FileTokenStore:
     def _read(self) -> dict:
         if not self.path.exists():
             return {}
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                f"Token file is corrupt and must be replaced {self.path}") from error
 
     def load(self, account: str) -> str | None:
         return self._read().get(account)
@@ -65,12 +69,18 @@ class KeychainTokenStore:
         return result.stdout.strip() or None
 
     def save(self, account: str, secret: str) -> None:
-        self._run(["security", "add-generic-password", "-a", account,
-                   "-s", self.service, "-w", secret, "-U"])
+        result = self._run(["security", "add-generic-password", "-a", account,
+                            "-s", self.service, "-w", secret, "-U"])
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Keychain save failed with exit code {result.returncode}")
 
     def delete(self, account: str) -> None:
-        self._run(["security", "delete-generic-password", "-a", account,
-                   "-s", self.service])
+        result = self._run(["security", "delete-generic-password", "-a", account,
+                            "-s", self.service])
+        if result.returncode not in (0, 44):
+            raise RuntimeError(
+                f"Keychain delete failed with exit code {result.returncode}")
 
 
 def default_token_store():
