@@ -6,8 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "notif-mgmt"
 version = "0.1.0"
 description = "Local-first AI notification and relationship CRM"
-requires-python = ">=3.11"
-dependencies = []
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]

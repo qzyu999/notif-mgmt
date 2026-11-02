@@ -1,6 +1,7 @@
 import pytest
+
 from notif_mgmt.models import InboundEvent
-from notif_mgmt.storage import connect, store_event, commit_events_and_cursor
+from notif_mgmt.storage import commit_events_and_cursor, connect, store_event
 
 
 def event(eid="m1", source="gmail"):

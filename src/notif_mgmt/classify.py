@@ -3,24 +3,23 @@ import re
 
 from .models import InboundEvent, TriageResult
 
-
 _SOCIAL_HINTS = {
-    "linkedin": re.compile(r"linkedin", re.I),
-    "x": re.compile(r"(?<!\w)(?:twitter|x\.com)(?!\w)", re.I),
-    "reddit": re.compile(r"reddit", re.I),
-    "instagram": re.compile(r"instagram", re.I),
-    "xiaohongshu": re.compile(r"xiaohongshu|小红书|rednote", re.I),
+    "linkedin": re.compile(r"linkedin", re.IGNORECASE),
+    "x": re.compile(r"(?<!\w)(?:twitter|x\.com)(?!\w)", re.IGNORECASE),
+    "reddit": re.compile(r"reddit", re.IGNORECASE),
+    "instagram": re.compile(r"instagram", re.IGNORECASE),
+    "xiaohongshu": re.compile(r"xiaohongshu|小红书|rednote", re.IGNORECASE),
 }
 
 _DIRECT_MESSAGE_HINT = re.compile(
     r"(?:sent you a message|new message from|messaged you|sent you a direct message|"
-    r"you have a new message|has sent you a message)", re.I
+    r"you have a new message|has sent you a message)", re.IGNORECASE
 )
 
 
 
 def classify(event: InboundEvent) -> TriageResult:
-    evidence = " ".join([event.sender, event.subject, event.preview])
+    evidence = f"{event.sender} {event.subject} {event.preview}"
     platform = event.platform
     if platform is None:
         for name, pattern in _SOCIAL_HINTS.items():

@@ -14,7 +14,8 @@
 ## Process
 
 - Follow red-green-refactor TDD for each component and contract; test negative paths and crash/retry paths.
-- Build vertical slices, not speculative architectures. Favor Python 3.11+, SQLite, standard libraries, FastAPI only when an HTTP UI is needed.
+- Build vertical slices, not speculative architectures. Python 3.12, SQLite, Pydantic; FastAPI + React/TypeScript/Vite only at the A5 web milestone (functionality first, deliberate visual design later in Phase B).
+- Canonical model: Person/Entity → Platform Identities → Interaction Signals → Follow-ups. Source evidence is stored separately from inferred state; identity resolution is minimal (unresolved, exact email/handle match, manual link) — no name-only matching, no merge workflows until needed. A notification alone creates at most a `review` follow-up candidate, never an asserted `needs_reply`.
 - For each meaningful change: explain scope, write failing tests, implement, run checks, and document evidence.
 - Maintain `docs/decisions.md` for irreversible design tradeoffs and update docs and checklists alongside code.
 - Keep API/model provider configuration via environment, never hardcode model names, endpoints, or keys.

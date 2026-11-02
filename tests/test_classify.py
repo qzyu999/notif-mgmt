@@ -3,9 +3,9 @@ from notif_mgmt.models import InboundEvent
 
 
 def event(**kwargs):
-    data = dict(source="gmail", external_id="abc", sender="notifications@linkedin.com",
-                subject="Alex sent you a message", preview="Hello",
-                received_at="2026-11-02T00:00:00Z", platform="linkedin")
+    data = {"source": "gmail", "external_id": "abc", "sender": "notifications@linkedin.com",
+            "subject": "Alex sent you a message", "preview": "Hello",
+            "received_at": "2026-11-02T00:00:00Z", "platform": "linkedin"}
     data.update(kwargs)
     return InboundEvent(**data)
 

@@ -4,7 +4,9 @@ import sqlite3
 from pathlib import Path
 
 from .classify import classify
-from .models import InboundEvent
+from .models import FollowUp, InboundEvent, InteractionSignal, Person, PlatformIdentity
+
+SCHEMA_VERSION = 2
 
 
 SCHEMA = """
@@ -58,6 +60,103 @@ CREATE TABLE IF NOT EXISTS followups (
 );
 """
 
+# v2 (A1): canonical person-centric tables. Evidence stays in inbound_events;
+# everything below is inferred/user-confirmed state, kept separate from it.
+# The v1 `followups` table (never written by code) is renamed to followups_v1.
+V2_SCHEMA = """
+CREATE TABLE IF NOT EXISTS people (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'person',
+  display_name TEXT NOT NULL,
+  notes TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS identities (
+  id INTEGER PRIMARY KEY,
+  person_id INTEGER REFERENCES people(id),
+  platform TEXT NOT NULL,
+  identity_kind TEXT NOT NULL,
+  value_normalized TEXT NOT NULL,
+  value_display TEXT NOT NULL,
+  match_status TEXT NOT NULL DEFAULT 'unmatched',
+  match_method TEXT,
+  confidence REAL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  UNIQUE(platform, identity_kind, value_normalized)
+);
+CREATE TABLE IF NOT EXISTS interaction_signals (
+  id INTEGER PRIMARY KEY,
+  source_event_id INTEGER NOT NULL REFERENCES inbound_events(id),
+  identity_id INTEGER REFERENCES identities(id),
+  person_id INTEGER REFERENCES people(id),
+  platform TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  occurred_at TEXT NOT NULL,
+  summary TEXT NOT NULL DEFAULT '',
+  actor_candidate TEXT,
+  confidence REAL NOT NULL,
+  parser_name TEXT NOT NULL,
+  parser_version TEXT NOT NULL,
+  dedupe_key TEXT NOT NULL UNIQUE,
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE TABLE IF NOT EXISTS followups (
+  id INTEGER PRIMARY KEY,
+  person_id INTEGER REFERENCES people(id),
+  signal_id INTEGER REFERENCES interaction_signals(id),
+  kind TEXT NOT NULL DEFAULT 'review',
+  status TEXT NOT NULL DEFAULT 'open',
+  title TEXT NOT NULL,
+  note TEXT NOT NULL DEFAULT '',
+  due_at TEXT,
+  snoozed_until TEXT,
+  created_by TEXT NOT NULL DEFAULT 'rule',
+  confidence REAL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  resolved_at TEXT
+);
+CREATE TABLE IF NOT EXISTS sync_state (
+  source TEXT NOT NULL,
+  account_id TEXT NOT NULL DEFAULT 'default',
+  cursor TEXT,
+  last_sync_completed_at TEXT,
+  last_error_code TEXT,
+  last_error_message TEXT,
+  last_recovery_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  PRIMARY KEY (source, account_id)
+);
+"""
+
+
+def _table_columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+
+
+def _migrate(db: sqlite3.Connection) -> None:
+    """Versioned migrations via PRAGMA user_version. Idempotent; preserves data."""
+    version = db.execute("PRAGMA user_version").fetchone()[0]
+    if version >= SCHEMA_VERSION:
+        return
+    if version < 1:
+        db.executescript(SCHEMA)  # v1 baseline (also creates the legacy tables)
+        db.execute("PRAGMA user_version = 1")
+    if version < 2:
+        tables = {r[0] for r in db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        if "followups" in tables and "signal_id" not in _table_columns(db, "followups"):
+            db.execute("ALTER TABLE followups RENAME TO followups_v1")
+        db.executescript(V2_SCHEMA)
+        db.execute(
+            """INSERT OR IGNORE INTO sync_state (source, account_id, cursor, updated_at)
+               SELECT source, 'default', cursor, updated_at FROM sync_cursors""")
+        db.execute("PRAGMA user_version = 2")
+    db.commit()
+
 
 def connect(path: str | Path) -> sqlite3.Connection:
     path = Path(path).expanduser()
@@ -66,7 +165,8 @@ def connect(path: str | Path) -> sqlite3.Connection:
     if os.name == "posix":
         path.chmod(0o600)
     db.row_factory = sqlite3.Row
-    db.executescript(SCHEMA)
+    db.execute("PRAGMA foreign_keys = ON")
+    _migrate(db)
     return db
 
 
@@ -115,4 +215,162 @@ def commit_events_and_cursor(
                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')""",
             (source, cursor),
         )
+        db.execute(
+            """INSERT INTO sync_state(source, account_id, cursor, last_sync_completed_at)
+               VALUES (?, 'default', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+               ON CONFLICT(source, account_id) DO UPDATE SET cursor=excluded.cursor,
+               last_sync_completed_at=excluded.last_sync_completed_at,
+               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')""",
+            (source, cursor),
+        )
     return inserted
+
+
+# --- A1 repositories: people, identities, signals, follow-ups -----------------
+# Identity resolution is intentionally minimal: unresolved identities, exact
+# (email/handle) matching, and manual linking. No name-only merging, ever.
+
+
+def create_person(db: sqlite3.Connection, display_name: str, kind: str = "person",
+                  notes: str = "") -> Person:
+    with db:
+        cur = db.execute(
+            "INSERT INTO people (kind, display_name, notes) VALUES (?, ?, ?)",
+            (kind, display_name, notes))
+    return Person(**dict(db.execute(
+        "SELECT * FROM people WHERE id=?", (cur.lastrowid,)).fetchone()))
+
+
+def list_people(db: sqlite3.Connection) -> list[Person]:
+    return [Person(**dict(r)) for r in db.execute(
+        "SELECT * FROM people ORDER BY display_name, id")]
+
+
+def _identity_by_value(db, platform, identity_kind, value_normalized):
+    return db.execute(
+        "SELECT * FROM identities WHERE platform=? AND identity_kind=? AND value_normalized=?",
+        (platform, identity_kind, value_normalized)).fetchone()
+
+
+def add_identity(db: sqlite3.Connection, person_id: int, *, platform: str,
+                 identity_kind: str, value: str) -> PlatformIdentity:
+    """Manually attach an exact identity (email/handle) to a person (verified)."""
+    normalized = value.strip().lstrip("@").lower()
+    existing = _identity_by_value(db, platform, identity_kind, normalized)
+    if existing is not None:
+        if existing["person_id"] not in (None, person_id):
+            raise ValueError("Identity already linked to a different person")
+        return PlatformIdentity(**dict(existing))
+    if db.execute("SELECT 1 FROM people WHERE id=?", (person_id,)).fetchone() is None:
+        raise ValueError(f"Unknown person id {person_id}")
+    with db:
+        cur = db.execute(
+            """INSERT INTO identities (person_id, platform, identity_kind, value_normalized,
+               value_display, match_status, match_method, confidence)
+               VALUES (?, ?, ?, ?, ?, 'verified', 'manual', 1.0)""",
+            (person_id, platform, identity_kind, normalized, value.strip()))
+    return PlatformIdentity(**dict(db.execute(
+        "SELECT * FROM identities WHERE id=?", (cur.lastrowid,)).fetchone()))
+
+
+def get_or_create_identity(db: sqlite3.Connection, *, platform: str, identity_kind: str,
+                           value_display: str, value_normalized: str,
+                           confidence: float | None = None) -> PlatformIdentity:
+    """Store an observed exact identity, unresolved unless already known."""
+    with db:
+        db.execute(
+            """INSERT OR IGNORE INTO identities
+               (platform, identity_kind, value_normalized, value_display,
+                match_status, match_method, confidence)
+               VALUES (?, ?, ?, ?, 'unmatched', 'parser', ?)""",
+            (platform, identity_kind, value_normalized, value_display, confidence))
+    return PlatformIdentity(**dict(_identity_by_value(
+        db, platform, identity_kind, value_normalized)))
+
+
+def link_identity(db: sqlite3.Connection, identity_id: int, person_id: int) -> None:
+    """Manual link: verify an identity against a person and backfill its signals."""
+    identity = db.execute("SELECT * FROM identities WHERE id=?", (identity_id,)).fetchone()
+    person = db.execute("SELECT * FROM people WHERE id=?", (person_id,)).fetchone()
+    if identity is None or person is None:
+        raise ValueError("Unknown identity or person id")
+    with db:
+        db.execute(
+            """UPDATE identities SET person_id=?, match_status='verified',
+               match_method='manual', confidence=1.0,
+               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id=?""",
+            (person_id, identity_id))
+        db.execute("UPDATE interaction_signals SET person_id=? WHERE identity_id=?",
+                   (person_id, identity_id))
+        db.execute(
+            """UPDATE followups SET person_id=? WHERE signal_id IN
+               (SELECT id FROM interaction_signals WHERE identity_id=?)""",
+            (person_id, identity_id))
+
+
+def assign_signal_person(db: sqlite3.Connection, signal_id: int, person_id: int) -> None:
+    """Manual association for signals whose actor is only a name candidate."""
+    signal = db.execute("SELECT 1 FROM interaction_signals WHERE id=?",
+                        (signal_id,)).fetchone()
+    person = db.execute("SELECT 1 FROM people WHERE id=?", (person_id,)).fetchone()
+    if signal is None or person is None:
+        raise ValueError("Unknown signal or person id")
+    with db:
+        db.execute("UPDATE interaction_signals SET person_id=? WHERE id=?",
+                   (person_id, signal_id))
+        db.execute("UPDATE followups SET person_id=? WHERE signal_id=?",
+                   (person_id, signal_id))
+
+
+def insert_signal(db: sqlite3.Connection, *, source_event_id: int,
+                  identity_id: int | None, person_id: int | None, platform: str,
+                  kind: str, occurred_at: str, summary: str,
+                  actor_candidate: str | None, confidence: float, parser_name: str,
+                  parser_version: str, dedupe_key: str) -> InteractionSignal | None:
+    """Insert a signal plus its review candidate atomically; None if duplicate."""
+    with db:
+        cur = db.execute(
+            """INSERT OR IGNORE INTO interaction_signals
+               (source_event_id, identity_id, person_id, platform, kind, occurred_at,
+                summary, actor_candidate, confidence, parser_name, parser_version, dedupe_key)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (source_event_id, identity_id, person_id, platform, kind, occurred_at,
+             summary, actor_candidate, confidence, parser_name, parser_version, dedupe_key))
+        if cur.rowcount != 1:
+            return None
+        signal_id = cur.lastrowid
+        actor = actor_candidate or platform
+        db.execute(
+            """INSERT INTO followups (person_id, signal_id, kind, status, title,
+               created_by, confidence)
+               VALUES (?, ?, 'review', 'open', ?, 'rule', ?)""",
+            (person_id, signal_id, f"Review {kind.replace('_', ' ')} from {actor}",
+             confidence))
+    return InteractionSignal(**dict(db.execute(
+        "SELECT * FROM interaction_signals WHERE id=?", (signal_id,)).fetchone()))
+
+
+def list_signals(db: sqlite3.Connection, person_id: int | None = None) -> list[InteractionSignal]:
+    query = "SELECT * FROM interaction_signals"
+    args: tuple = ()
+    if person_id is not None:
+        query += " WHERE person_id=?"
+        args = (person_id,)
+    query += " ORDER BY occurred_at, id"
+    return [InteractionSignal(**dict(r)) for r in db.execute(query, args)]
+
+
+def list_followups(db: sqlite3.Connection, person_id: int | None = None,
+                   status: str | None = None) -> list[FollowUp]:
+    clauses, args = [], []
+    if person_id is not None:
+        clauses.append("person_id=?")
+        args.append(person_id)
+    if status is not None:
+        clauses.append("status=?")
+        args.append(status)
+    query = "SELECT * FROM followups"
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY created_at, id"
+    return [FollowUp(**dict(r)) for r in db.execute(query, tuple(args))]

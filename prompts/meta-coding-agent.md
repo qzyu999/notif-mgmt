@@ -1,5 +1,7 @@
 # Copy/paste prompt — coding agent using Meta hackathon credits
 
+> **Superseded (2026-11-02, M0):** the canonical specs are now `README.md`, `AGENTS.md`, `docs/architecture.md`, and `docs/decisions.md` (person-centric model; A1 foundation implemented). This prompt is kept for historical context; milestone numbering below (M1–M7) predates the A1–A6 plan.
+
 You are the principal engineer implementing `qzyu999/notif-mgmt`, a PRIVATE, local-first AI CRM that consolidates founder relationship signals from Gmail notification emails first, then later from macOS-mirrored iPhone notifications. The objective is to answer: "Who contacted me? About what? Who might need a follow-up? When did we last interact?" The initial use case is coordinating developer, GPU-provider, tester, investor, and collaborator conversations for a project called Inference Exchange. This is a distinct repo, not part of Inference Exchange.
 
 Read `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/decisions.md` and the entire code/test tree BEFORE modifying code. Preserve the invariants and work via small, tested vertical slices. Do not replace the existing implementation wholesale.
