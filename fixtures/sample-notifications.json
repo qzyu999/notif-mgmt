@@ -1,0 +1,26 @@
+[
+  {
+    "source":"gmail", "external_id":"fixture-msg-001", "platform":"linkedin",
+    "sender":"LinkedIn <messages-noreply@example.invalid>",
+    "subject":"Alex sent you a message on LinkedIn",
+    "preview":"Alex: Interested in testing the provider onboarding flow.",
+    "received_at":"2026-11-02T17:00:00Z", "thread_id":"fixture-thread-001",
+    "conversation_url":null
+  },
+  {
+    "source":"gmail", "external_id":"fixture-msg-002", "platform":"reddit",
+    "sender":"Reddit <notifications@example.invalid>",
+    "subject":"You've got activity on Reddit",
+    "preview":"Someone replied to a discussion.",
+    "received_at":"2026-11-02T17:05:00Z", "thread_id":"fixture-thread-002",
+    "conversation_url":null
+  },
+  {
+    "source":"gmail", "external_id":"fixture-msg-003", "platform":null,
+    "sender":"Taylor <taylor@example.invalid>",
+    "subject":"Inference Exchange feedback",
+    "preview":"I'd like to understand the privacy model.",
+    "received_at":"2026-11-02T17:10:00Z", "thread_id":"fixture-thread-003",
+    "conversation_url":null
+  }
+]
