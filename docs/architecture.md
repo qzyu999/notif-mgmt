@@ -118,15 +118,25 @@ the next derivation reuses them. Manual assignments, confirmed
 obligations, withdrawn signals, and dismissed candidates are not reset
 by repair or replay.
 
-Two narrower windows remain documented rather than overstated. A message
+One narrower window remains documented rather than overstated. A message
 first added and permanently deleted inside the same previously unseen
 history batch has no stored signal for the batch withdrawal to act on,
-so its post-commit derivation can still create an active signal. The
-expired-cursor recovery gap row is also recorded after the recovered
-batch commit, so a crash at that exact point could advance the cursor
-without the gap marker. Neither window affects the atomicity of events,
-derived-state withdrawals, dismissals, and cursor advancement for
-previously stored events.
+so its post-commit derivation can still create an active signal. That
+window does not affect the atomicity of events, derived-state withdrawals,
+dismissals, and cursor advancement for previously stored events.
+
+## Expired-cursor recovery atomicity (A6-5)
+
+Bounded recovery from an expired Gmail history cursor commits its events,
+cursor advancement, `sync_gaps` row, and `sync_state.last_recovery_at`
+timestamp in the same SQLite transaction as the recovered batch. A crash
+or failure while recording the gap therefore rolls back the recovered
+events and cursor together, and a later retry can apply the complete
+recovery. Signal derivation remains the separate self-healing step
+described above, so recovery does not claim that signals or follow-ups
+are part of that transaction. Replaying a recovery inserts no duplicate
+events, signals, or follow-ups. A distinct later expiration is a distinct
+recovery and records its own gap row.
 
 ## Web API (A5, in progress)
 

@@ -287,12 +287,16 @@ def commit_events_and_cursor(
 def commit_sync_batch(
     db: sqlite3.Connection, source: str, events: list[InboundEvent], cursor: str,
     account_id: str = "default", deleted_external_ids: list[str] | tuple[str, ...] = (),
+    recovery_gap: tuple[str | None, str] | None = None,
 ) -> tuple[int, int]:
-    """Atomically commit events, deletions, and the cursor that covers them.
+    """Atomically commit events, deletions, cursor, and any recovery gap.
 
     Withdrawal and review-candidate dismissal share the cursor transaction,
     so an interrupted sync cannot advance past a deletion it never applied.
-    Returns (inserted, withdrawn).
+    When ``recovery_gap`` is ``(old_cursor, recovery_query)``, the gap row
+    and recovery timestamp for ``cursor`` share that same transaction, so a
+    recovered cursor cannot commit without its gap marker. Returns
+    (inserted, withdrawn).
     """
     inserted = 0
     with db:
@@ -332,6 +336,9 @@ def commit_sync_batch(
                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')""",
             (source, account_id, cursor),
         )
+        if recovery_gap is not None:
+            old_cursor, recovery_query = recovery_gap
+            _record_sync_gap(db, source, account_id, old_cursor, cursor, recovery_query)
     return inserted, deleted
 
 
@@ -358,19 +365,25 @@ def record_sync_error(db: sqlite3.Connection, source: str, account_id: str,
             (source, account_id, code, message[:200]))
 
 
+def _record_sync_gap(db: sqlite3.Connection, source: str, account_id: str,
+                     old_cursor: str | None, new_cursor: str, recovery_query: str) -> None:
+    """Write one recovery gap. The caller owns the transaction."""
+    db.execute(
+        """INSERT INTO sync_gaps (source, account_id, old_cursor, new_cursor, recovery_query)
+           VALUES (?, ?, ?, ?, ?)""",
+        (source, account_id, old_cursor, new_cursor, recovery_query))
+    db.execute(
+        """UPDATE sync_state SET last_recovery_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+           updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+           WHERE source=? AND account_id=?""",
+        (source, account_id))
+
+
 def record_sync_gap(db: sqlite3.Connection, source: str, account_id: str,
                     old_cursor: str | None, new_cursor: str, recovery_query: str) -> None:
     """Record a potential synchronization gap from bounded cursor recovery."""
     with db:
-        db.execute(
-            """INSERT INTO sync_gaps (source, account_id, old_cursor, new_cursor, recovery_query)
-               VALUES (?, ?, ?, ?, ?)""",
-            (source, account_id, old_cursor, new_cursor, recovery_query))
-        db.execute(
-            """UPDATE sync_state SET last_recovery_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-               WHERE source=? AND account_id=?""",
-            (source, account_id))
+        _record_sync_gap(db, source, account_id, old_cursor, new_cursor, recovery_query)
 
 
 def withdraw_signals_for_source_event(db: sqlite3.Connection, source: str,
