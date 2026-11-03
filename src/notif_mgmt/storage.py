@@ -240,11 +240,60 @@ def store_event(db: sqlite3.Connection, event: InboundEvent) -> bool:
         return cursor.rowcount == 1
 
 
+def _withdraw_signals(db: sqlite3.Connection, source: str, account_id: str,
+                      external_id: str) -> int:
+    """Withdraw active signals for one source event and dismiss their candidates.
+
+    The caller owns the transaction. Only signals that transition in this
+    call take part, so a repeated deletion cannot dismiss a follow-up the
+    user reopened afterwards. Source evidence is never deleted.
+    """
+    signal_ids = [row["id"] for row in db.execute(
+        """SELECT s.id FROM interaction_signals s
+           JOIN inbound_events e ON e.id = s.source_event_id
+           WHERE s.status='active' AND e.source=? AND e.account_id=?
+             AND e.external_id=?""",
+        (source, account_id, external_id))]
+    if not signal_ids:
+        return 0
+    placeholders = ", ".join("?" for _ in signal_ids)
+    db.execute(
+        f"UPDATE interaction_signals SET status='withdrawn' WHERE id IN ({placeholders})",
+        signal_ids)
+    # A notification alone created at most a system-generated review
+    # candidate. Only that narrow class is auto-dismissed. User-confirmed
+    # obligations and user-created or snoozed items are deliberate state.
+    db.execute(
+        f"""UPDATE followups
+            SET status='dismissed',
+                resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+            WHERE signal_id IN ({placeholders}) AND status='open'
+              AND kind='review' AND created_by='rule'""",
+        signal_ids)
+    return len(signal_ids)
+
+
 def commit_events_and_cursor(
     db: sqlite3.Connection, source: str, events: list[InboundEvent], cursor: str,
     account_id: str = "default",
 ) -> int:
     """Atomic batch: records and account cursor are committed or rolled back together."""
+    inserted, _deleted = commit_sync_batch(
+        db, source, events, cursor, account_id=account_id)
+    return inserted
+
+
+def commit_sync_batch(
+    db: sqlite3.Connection, source: str, events: list[InboundEvent], cursor: str,
+    account_id: str = "default", deleted_external_ids: list[str] | tuple[str, ...] = (),
+) -> tuple[int, int]:
+    """Atomically commit events, deletions, and the cursor that covers them.
+
+    Withdrawal and review-candidate dismissal share the cursor transaction,
+    so an interrupted sync cannot advance past a deletion it never applied.
+    Returns (inserted, withdrawn).
+    """
     inserted = 0
     with db:
         for event in events:
@@ -265,6 +314,9 @@ def commit_events_and_cursor(
                  triage.state, triage.reason, triage.confidence),
             )
             inserted += int(row.rowcount == 1)
+        deleted = sum(
+            _withdraw_signals(db, source, account_id, external_id)
+            for external_id in deleted_external_ids)
         db.execute(
             """INSERT INTO sync_cursors(source, cursor) VALUES (?, ?)
                ON CONFLICT(source) DO UPDATE SET cursor=excluded.cursor,
@@ -280,7 +332,7 @@ def commit_events_and_cursor(
                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')""",
             (source, account_id, cursor),
         )
-    return inserted
+    return inserted, deleted
 
 
 # --- A2 sync-state helpers -----------------------------------------------------
@@ -323,15 +375,14 @@ def record_sync_gap(db: sqlite3.Connection, source: str, account_id: str,
 
 def withdraw_signals_for_source_event(db: sqlite3.Connection, source: str,
                                       account_id: str, external_id: str) -> int:
-    """Mark signals from a deleted source item withdrawn (evidence is kept)."""
+    """Mark signals from a deleted source item withdrawn (evidence is kept).
+
+    Open system-generated review candidates on the newly withdrawn signals
+    are dismissed in the same transaction. Returns the number of signals
+    that transitioned, so repeated deletion reports zero.
+    """
     with db:
-        cur = db.execute(
-            """UPDATE interaction_signals SET status='withdrawn'
-               WHERE status='active' AND source_event_id IN
-                 (SELECT id FROM inbound_events
-                  WHERE source=? AND account_id=? AND external_id=?)""",
-            (source, account_id, external_id))
-        return cur.rowcount
+        return _withdraw_signals(db, source, account_id, external_id)
 
 
 # --- A1 repositories: people, identities, signals, follow-ups -----------------

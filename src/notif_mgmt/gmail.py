@@ -18,10 +18,10 @@ from .models import InboundEvent
 from .pipeline import process_unprocessed_events
 from .storage import (
     commit_events_and_cursor,
+    commit_sync_batch,
     get_sync_state,
     record_sync_error,
     record_sync_gap,
-    withdraw_signals_for_source_event,
 )
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -200,13 +200,11 @@ class GmailConnector:
             raise self._fail(error)
         try:
             events = self._fetch_events(added_ids)
-            inserted = commit_events_and_cursor(
-                self.db, SOURCE, events, new_cursor, account_id=self.account_id)
+            inserted, deleted = commit_sync_batch(
+                self.db, SOURCE, events, new_cursor, account_id=self.account_id,
+                deleted_external_ids=deleted_ids)
         except (GmailAuthError, GmailSyncError) as error:
             raise self._fail(error)
-        deleted = sum(
-            withdraw_signals_for_source_event(self.db, SOURCE, self.account_id, mid)
-            for mid in deleted_ids)
         process_unprocessed_events(self.db, source=SOURCE, account_id=self.account_id)
         return SyncResult(fetched=len(events), inserted=inserted,
                           duplicates=len(events) - inserted, deleted=deleted)

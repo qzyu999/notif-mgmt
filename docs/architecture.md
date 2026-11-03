@@ -77,6 +77,24 @@ Deferred until needed: suggested matches, reversible merge workflows, cross-plat
 
 See `docs/gmail-oauth.md` for operator setup.
 
+## Deletion consistency (A6-2)
+
+Permanent deletion at the source withdraws the derived signal but never
+erases source evidence or the withdrawn signal itself, so historical
+attribution stays inspectable. Withdrawal auto-dismisses only follow-ups
+that are simultaneously open, of kind `review`, and system-generated
+(`created_by='rule'`). User-confirmed obligations (`reply`, `waiting`,
+`follow_up`), user-created reviews, snoozed reviews, and already-resolved
+follow-ups are deliberate state and are left untouched. Only signals that
+transition to withdrawn in the current call take part, which makes a
+repeated deletion a no-op and protects a candidate the user deliberately
+reopened. Gmail incremental sync applies event inserts, withdrawals, and
+cursor advancement in one SQLite transaction, so an interrupted sync
+either applies none of them or leaves a fully consistent state behind.
+Replay cannot recreate a dismissed candidate because signal dedupe is
+scoped to the source event. No schema change was needed because kind,
+status, and `created_by` already encode the policy distinction.
+
 ## Web API (A5, in progress)
 
 - **A5a (implemented):** `src/notif_mgmt/api.py` is a thin FastAPI layer over
