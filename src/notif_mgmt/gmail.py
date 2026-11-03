@@ -198,6 +198,10 @@ class GmailConnector:
                 raise self._fail(recovery_error)
         except (GmailAuthError, GmailSyncError) as error:
             raise self._fail(error)
+        # Repair signals missing from an earlier committed batch before this
+        # batch applies deletions. Otherwise a message deleted while its
+        # signal was still underived would be recreated as active below.
+        process_unprocessed_events(self.db, source=SOURCE, account_id=self.account_id)
         try:
             events = self._fetch_events(added_ids)
             inserted, deleted = commit_sync_batch(

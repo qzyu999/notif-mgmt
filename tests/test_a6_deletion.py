@@ -276,8 +276,13 @@ def test_crash_after_commit_leaves_consistent_dismissed_state(tmp_path, monkeypa
         ([{"messagesDeleted": [{"message": {"id": "m2"}}]}], "105"),
     ]
 
+    calls = {"count": 0}
+
     def crash(db_, *, source, account_id):
-        raise RuntimeError("simulated crash after commit")
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("simulated crash after commit")
+        return 0
 
     monkeypatch.setattr(gmail_module, "process_unprocessed_events", crash)
     with pytest.raises(RuntimeError):

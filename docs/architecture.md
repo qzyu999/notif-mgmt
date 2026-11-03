@@ -95,6 +95,39 @@ Replay cannot recreate a dismissed candidate because signal dedupe is
 scoped to the source event. No schema change was needed because kind,
 status, and `created_by` already encode the policy distinction.
 
+## Crash consistency and self-healing (A6-4)
+
+The strong atomic unit is the Gmail batch commit. Source-event inserts,
+withdrawals for previously derived signals, review-candidate dismissals,
+and cursor advancement either commit together or roll back together.
+Signal derivation is intentionally a separate self-healing step rather
+than part of that transaction. Each derived signal and its initial
+follow-up commit together, and a later sync derives only events that
+still have no signal. Incremental sync now repairs missing signals from
+earlier committed batches before applying new deletions, so an event
+deleted while underived is withdrawn instead of being resurrected.
+
+The resulting guarantee is eventual consistency after a crash between
+the batch commit and derivation. The database can temporarily contain
+committed evidence and an advanced cursor without the corresponding
+signals or follow-ups until the next successful sync. API reads in that
+window are internally consistent for each request but can show the
+not-yet-derived state. Identity rows can also exist briefly before their
+signal if derivation stops between identity creation and signal insert;
+the next derivation reuses them. Manual assignments, confirmed
+obligations, withdrawn signals, and dismissed candidates are not reset
+by repair or replay.
+
+Two narrower windows remain documented rather than overstated. A message
+first added and permanently deleted inside the same previously unseen
+history batch has no stored signal for the batch withdrawal to act on,
+so its post-commit derivation can still create an active signal. The
+expired-cursor recovery gap row is also recorded after the recovered
+batch commit, so a crash at that exact point could advance the cursor
+without the gap marker. Neither window affects the atomicity of events,
+derived-state withdrawals, dismissals, and cursor advancement for
+previously stored events.
+
 ## Web API (A5, in progress)
 
 - **A5a (implemented):** `src/notif_mgmt/api.py` is a thin FastAPI layer over
