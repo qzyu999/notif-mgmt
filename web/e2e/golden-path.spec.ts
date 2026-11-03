@@ -23,7 +23,7 @@ test("manual triage golden path", async ({ page }) => {
   await page.getByRole("button", { name: "Done" }).first().click();
   // Let the open-list refetch settle before switching filters, so a slow
   // response cannot overwrite the done list afterwards.
-  await expect(page.getByRole("button", { name: "Done" })).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Done" })).toHaveCount(1);
   await page.getByLabel("Status").selectOption("done");
   await expect(page.getByRole("button", { name: "Reopen" }).first())
     .toBeVisible();

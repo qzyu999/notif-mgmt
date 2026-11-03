@@ -37,10 +37,13 @@ def process_event(db: sqlite3.Connection, event: InboundEvent) -> InteractionSig
     # replayed over old events must never mint duplicate signals/follow-ups.
     # Historical signals keep their original parser name/version.
     dedupe_key = f"{event.source}:{event.account_id}:{event.external_id}"
-    # Only interaction-shaped kinds ask for human review; automated and
-    # unclassified mail is kept as evidence without a follow-up candidate.
-    create_followup = parsed.kind in {
-        "direct_message_notification", "platform_activity", "direct_email"}
+    # Only direct interpersonal outreach creates a review candidate. A
+    # direct message notification or a direct email reasonably indicates
+    # someone reached out; routine platform activity (likes, invitations,
+    # mentions, trending posts, promotions, account notices) is preserved
+    # as a signal without asking for triage. Automated and unclassified
+    # mail likewise stays evidence-only.
+    create_followup = parsed.kind in {"direct_message_notification", "direct_email"}
     return insert_signal(
         db, source_event_id=row["id"], identity_id=identity_id, person_id=person_id,
         platform=parsed.platform, kind=parsed.kind, occurred_at=event.received_at,

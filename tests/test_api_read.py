@@ -101,13 +101,21 @@ def test_identities_filter_by_match_status(client):
 def test_followups_filters(client):
     open_reviews = client.get(
         "/api/v1/followups", params={"status": "open", "kind": "review"}).json()
-    assert len(open_reviews) == 3
+    # The LinkedIn DM and the direct email are review candidates; the
+    # routine Reddit activity fixture is evidence only.
+    assert len(open_reviews) == 2
     assert all(f["status"] == "open" and f["kind"] == "review" for f in open_reviews)
     assert client.get("/api/v1/followups", params={"status": "done"}).json() == []
 
 
 def test_today_groups_due_snoozed_and_candidates(client, seeded):
     db = connect(seeded)
+    # The fixtures yield two candidates under the A6-3 gate; add one more
+    # direct outreach so all three Today groups can be exercised at once.
+    process_event(db, InboundEvent(
+        source="gmail", external_id="today-extra",
+        sender="Sam <sam@example.invalid>", subject="One more question",
+        preview="Could you take a look?", received_at="2026-11-02T19:00:00Z"))
     followups = list_followups(db)
     due, snoozed, candidate = followups[0], followups[1], followups[2]
     with db:

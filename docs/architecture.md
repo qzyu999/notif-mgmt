@@ -142,14 +142,14 @@ status, and `created_by` already encode the policy distinction.
 ## Parser registry (A3)
 
 Deterministic parsers live in `parsing.py` behind a versioned registry
-(`PARSER_REGISTRY`, e.g. `linkedin-notifications` v1, `generic-email` v1);
+(`PARSER_REGISTRY`, e.g. `linkedin-notifications` v1, `generic-email` v2);
 the parser name/version is stamped on every signal for reproducibility.
 
 - **Verified origin only.** A platform is asserted only when the sender
   address sits on a trusted platform domain (subdomains allowed). Wording
   that merely mentions a platform is never proof of origin: a sender that
   claims a platform without a verified domain, automated senders
-  (no-reply/newsletter/notification local parts), and anything else
+  (no-reply/newsletter/notification/promotion local parts), and anything else
   unrecognized degrade to `platform="unknown"` with kind
   `unclassified_email` or `automated_notification`.
 - **Conservative extraction.** Actor candidates and handle identities are
@@ -157,9 +157,15 @@ the parser name/version is stamped on every signal for reproducibility.
   Reddit `u/name`, named DM/invitation/mention subjects, and the Xiaohongshu
   DM template. Anonymous templates ("Someone sent you a message") yield no
   actor. Nothing is fabricated from unverified mail.
-- **Follow-up gating.** Only `direct_message_notification`,
-  `platform_activity`, and `direct_email` create review candidates;
-  automated/unclassified signals are stored as evidence without follow-ups.
+- **Follow-up gating.** Only `direct_message_notification` and
+  `direct_email` create review candidates, because only those kinds
+  reasonably indicate direct interpersonal outreach from the notification
+  alone. Routine `platform_activity` such as likes, invitations, mentions,
+  replies, trending posts, promotions, and account notices remains stored
+  interaction evidence without a candidate. Automated and unclassified
+  signals follow the same evidence-only rule. The gate applies when a
+  signal is first inserted, so tightening it never deletes an existing
+  user-created or user-confirmed follow-up.
 - **Upgrade safety.** The signal dedupe key is scoped to the source event
   (not the parser), so a parser upgrade replayed over old events cannot
   create duplicate signals or follow-ups; historical signals keep their

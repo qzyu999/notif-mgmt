@@ -17,7 +17,7 @@ from .config import excerpt_chars
 from .models import InboundEvent
 
 PARSER_NAME = "generic-email"
-PARSER_VERSION = "1"
+PARSER_VERSION = "2"
 
 
 @dataclass(frozen=True)
@@ -66,6 +66,7 @@ _DM_PATTERNS = [
 _AUTOMATED_LOCALPARTS = {
     "noreply", "donotreply", "notifications", "notification",
     "mailerdaemon", "newsletter", "newsletters", "digest",
+    "promotions", "promo", "marketing",
 }
 _NON_ACTORS = {"someone", "a user", "you"}
 

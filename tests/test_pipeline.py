@@ -43,9 +43,15 @@ def test_fixture_notifications_become_signals_with_review_candidates(tmp_path):
     assert linkedin.kind == "direct_message_notification"
     assert linkedin.actor_candidate == "Alex"
     assert linkedin.parser_name and linkedin.parser_version
-    # A notification alone never asserts a reply is owed.
+    # A notification alone never asserts a reply is owed. Only the direct
+    # message and direct email create review candidates; the routine
+    # Reddit activity signal is preserved without one.
     followups = list_followups(db)
-    assert followups and all(f.kind == "review" and f.status == "open" for f in followups)
+    assert len(followups) == 2
+    assert all(f.kind == "review" and f.status == "open" for f in followups)
+    reddit = by_platform["reddit"]
+    assert reddit.kind == "platform_activity"
+    assert all(f.signal_id != reddit.id for f in followups)
 
 
 def test_replay_is_idempotent(tmp_path):
@@ -54,7 +60,7 @@ def test_replay_is_idempotent(tmp_path):
     again = load(db)
     assert all(r is None for r in again)
     assert len(list_signals(db)) == 3
-    assert len(list_followups(db)) == 3
+    assert len(list_followups(db)) == 2
 
 
 def test_actor_name_alone_creates_no_identity_and_no_person(tmp_path):
