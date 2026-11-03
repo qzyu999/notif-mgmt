@@ -25,6 +25,7 @@ function Section({
   empty,
   context,
   onChanged,
+  emphasis = "normal",
 }: {
   title: string;
   description: string;
@@ -32,10 +33,16 @@ function Section({
   empty: string;
   context: Context;
   onChanged: (message: string) => void;
+  emphasis?: "strong" | "normal" | "quiet";
 }) {
   return (
-    <section>
-      <h2>{title}</h2>
+    <section className={`today-section section-${emphasis}`}>
+      <div className="section-heading">
+        <h2>{title}</h2>
+        <span className="count-chip" aria-label={`${items.length} items`}>
+          {items.length}
+        </span>
+      </div>
       <p className="section-description">{description}</p>
       {items.length === 0 ? (
         <EmptyState>{empty}</EmptyState>
@@ -121,12 +128,21 @@ export default function Today() {
         </p>
       )}
       {notice && (
-        <p className="feedback feedback-success" role="status">
-          {notice}
-        </p>
+        <div className="feedback feedback-success" role="status">
+          <span>{notice}</span>
+          <button
+            type="button"
+            className="feedback-dismiss"
+            aria-label="Dismiss feedback"
+            onClick={() => setNotice(null)}
+          >
+            ×
+          </button>
+        </div>
       )}
       <Section
         title="Due and overdue"
+        emphasis="strong"
         description="Obligations you confirmed and scheduled."
         items={today.due}
         empty="Nothing due."
@@ -143,6 +159,7 @@ export default function Today() {
       />
       <Section
         title="Review candidates"
+        emphasis="quiet"
         description="A notification created these candidates. It does not prove that a reply is owed."
         items={today.review_candidates}
         empty="No review candidates. A notification alone never means a reply is owed."

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api";
 import { formatDateTime, humanize, initials } from "../format";
@@ -41,6 +41,11 @@ export default function FollowUpCard({
     signal?.actor_candidate ?? identity?.value_display ?? "",
   );
   const [selected, setSelected] = useState<PersonOption | null>(null);
+  const confirmationRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (selected) confirmationRef.current?.focus();
+  }, [selected]);
 
   const displayName =
     person?.display_name ??
@@ -63,6 +68,23 @@ export default function FollowUpCard({
       candidate.platforms.some((platform) => platform.toLowerCase().includes(needle)),
     );
   }, [people, query]);
+
+  const cardTone = signal?.status === "withdrawn"
+    ? "withdrawn"
+    : followup.kind === "review"
+      ? "candidate"
+      : "confirmed";
+  const whyItMatters = signal?.status === "withdrawn"
+    ? "The source item was deleted. This historical signal is kept as evidence, and no reply is assumed."
+    : followup.status === "done"
+      ? "You marked this complete. The underlying evidence stays in the person's timeline."
+      : followup.status === "dismissed"
+        ? "You dismissed this item. Dismissing is reversible and never deletes the underlying evidence."
+        : followup.status === "snoozed"
+          ? `You postponed this${followup.snoozed_until ? ` until ${formatDateTime(followup.snoozed_until)}` : ""}. It will resurface for a fresh decision.`
+          : followup.kind === "review"
+            ? "A notification suggested direct contact, but that alone does not prove a reply is owed. This is here for your judgment."
+            : `You confirmed this needs attention${followup.due_at ? ` by ${formatDateTime(followup.due_at)}` : ""}.`;
 
   const run = async (action: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -102,7 +124,7 @@ export default function FollowUpCard({
   };
 
   return (
-    <article className="followup-card" aria-label={`Follow-up from ${displayName}`}>
+    <article className={`followup-card card-${cardTone}`} aria-label={`Follow-up from ${displayName}`}>
       <div className="card-heading">
         <span className="person-avatar" aria-hidden="true">
           {initials(displayName)}
@@ -148,6 +170,11 @@ export default function FollowUpCard({
             item was deleted; the historical signal is preserved.
           </p>
         )}
+      </div>
+
+      <div className="why-block">
+        <p className="why-label">Why this matters</p>
+        <p>{whyItMatters}</p>
       </div>
 
       <div className="identity-line">
@@ -205,36 +232,38 @@ export default function FollowUpCard({
             {resolutionMode === "identity" ? "Resolve identity" : "Assign interaction"}
           </Button>
         )}
-        {followup.status === "snoozed" && (
-          <Button disabled={busy} onClick={update({ status: "open" }, `${displayName}'s item was resumed.`)}>
-            Resume
-          </Button>
-        )}
-        {followup.kind === "review" && followup.status !== "done" && followup.status !== "dismissed" && (
+        {(followup.status === "done" || followup.status === "dismissed") && (
           <Button
             variant="primary"
             disabled={busy}
-            onClick={update({ kind: "reply" }, `${displayName}'s item is now marked as needing a reply.`)}
+            onClick={update({ status: "open" }, `${displayName}'s item was reopened.`)}
           >
-            Mark as needs reply
+            Reopen
           </Button>
         )}
-        {followup.status !== "done" && followup.status !== "dismissed" && (
+        {followup.status === "snoozed" && (
           <>
-            <Button disabled={busy} onClick={update({ status: "done" }, `${displayName}'s item was completed.`)}>
-              Done
+            <Button
+              variant="primary"
+              disabled={busy}
+              onClick={update({ status: "open" }, `${displayName}'s item was resumed.`)}
+            >
+              Resume
             </Button>
-            {followup.status !== "snoozed" && (
+            {followup.kind === "review" && (
               <Button
                 disabled={busy}
-                onClick={update(
-                  { status: "snoozed", snoozed_until: snoozeUntil() },
-                  `${displayName}'s item was snoozed for 7 days.`,
-                )}
+                onClick={update({ kind: "reply" }, `${displayName}'s item is now marked as needing a reply.`)}
               >
-                Snooze 7 days
+                Mark as needs reply
               </Button>
             )}
+            <Button
+              disabled={busy}
+              onClick={update({ status: "done" }, `${displayName}'s item was completed.`)}
+            >
+              Done
+            </Button>
             <Button
               variant="quiet"
               disabled={busy}
@@ -244,12 +273,58 @@ export default function FollowUpCard({
             </Button>
           </>
         )}
-        {(followup.status === "done" || followup.status === "dismissed") && (
-          <Button disabled={busy} onClick={update({ status: "open" }, `${displayName}'s item was reopened.`)}>
-            Reopen
-          </Button>
+        {followup.status !== "done" && followup.status !== "dismissed" && followup.status !== "snoozed" && (
+          <>
+            {followup.kind === "review" ? (
+              <>
+                <Button
+                  variant="primary"
+                  disabled={busy}
+                  onClick={update({ kind: "reply" }, `${displayName}'s item is now marked as needing a reply.`)}
+                >
+                  Mark as needs reply
+                </Button>
+                <Button
+                  disabled={busy}
+                  onClick={update({ status: "done" }, `${displayName}'s item was completed.`)}
+                >
+                  Done
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="primary"
+                disabled={busy}
+                onClick={update({ status: "done" }, `${displayName}'s item was completed.`)}
+              >
+                Done
+              </Button>
+            )}
+            <Button
+              disabled={busy}
+              onClick={update(
+                { status: "snoozed", snoozed_until: snoozeUntil() },
+                `${displayName}'s item was snoozed for 7 days.`,
+              )}
+            >
+              Snooze 7 days
+            </Button>
+            <Button
+              variant="quiet"
+              disabled={busy}
+              onClick={update({ status: "dismissed" }, `${displayName}'s item was dismissed.`)}
+            >
+              Dismiss
+            </Button>
+          </>
         )}
       </div>
+      {followup.kind === "review" && followup.status !== "done" && followup.status !== "dismissed" && (
+        <p className="action-hint">
+          Dismissing keeps the evidence but removes this candidate. You can
+          reopen it later from Follow-ups.
+        </p>
+      )}
 
       {resolverOpen && resolutionMode && (
         <section className="resolver" aria-label="Resolve this interaction">
@@ -269,6 +344,7 @@ export default function FollowUpCard({
             </p>
           )}
 
+          <p className="resolver-step">Step 1 · Choose a person</p>
           <label>
             Find a person{" "}
             <input
@@ -296,6 +372,12 @@ export default function FollowUpCard({
             <p>No matching person. Create one below, then confirm the association.</p>
           )}
 
+          {resolutionMode === "signal" && (
+            <p className="name-only-callout">
+              Name-only caution — this assigns one interaction and creates no
+              reusable identity.
+            </p>
+          )}
           <div className="create-person-row">
             <label>
               New person name{" "}
@@ -311,7 +393,15 @@ export default function FollowUpCard({
           </div>
 
           {selected && (
-            <div className="resolution-confirmation">
+            <div
+              className="resolution-confirmation"
+              ref={confirmationRef}
+              tabIndex={-1}
+            >
+              <p className="resolver-step">Step 2 · Confirm</p>
+              <p>
+                <span className="selected-chip">Selected · {selected.display_name}</span>
+              </p>
               <p>
                 {resolutionMode === "identity" && identity
                   ? `Confirm that ${identity.value_display} belongs to ${selected.display_name}. Related signals and follow-ups for that identity will use this person.`

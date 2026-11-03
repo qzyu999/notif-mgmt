@@ -65,9 +65,17 @@ export default function FollowUps() {
         </select>
       </label>
       {notice && (
-        <p className="feedback feedback-success" role="status">
-          {notice}
-        </p>
+        <div className="feedback feedback-success" role="status">
+          <span>{notice}</span>
+          <button
+            type="button"
+            className="feedback-dismiss"
+            aria-label="Dismiss feedback"
+            onClick={() => setNotice(null)}
+          >
+            ×
+          </button>
+        </div>
       )}
       {!followups ? (
         <LoadingState />

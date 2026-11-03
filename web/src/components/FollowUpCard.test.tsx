@@ -132,6 +132,49 @@ describe("FollowUpCard", () => {
     );
   });
 
+  it("gives a confirmed obligation Done as its primary action", () => {
+    render(
+      <FollowUpCard
+        followup={{ ...followup, kind: "reply" }}
+        signal={signal}
+        person={null}
+        identity={identity}
+        people={[]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/You confirmed this needs attention/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Done" }).className).toContain(
+      "button-primary",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Mark as needs reply" }),
+    ).toBeNull();
+    const dismiss = screen.getByRole("button", { name: "Dismiss" });
+    expect(dismiss.className).toContain("button-quiet");
+    expect(dismiss.className).not.toContain("button-danger");
+  });
+
+  it("explains that dismissing a candidate keeps the evidence", () => {
+    render(
+      <FollowUpCard
+        followup={followup}
+        signal={signal}
+        person={null}
+        identity={identity}
+        people={[]}
+        onChanged={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/does not prove a reply is owed/)).toBeTruthy();
+    expect(screen.getByText(/Dismissing keeps the evidence/)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Mark as needs reply" }).className,
+    ).toContain("button-primary");
+  });
+
   it("warns that an actor name alone is not an identity", async () => {
     render(
       <FollowUpCard

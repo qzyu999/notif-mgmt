@@ -33,7 +33,7 @@ test("today identity and triage workflow persists", async ({ page }) => {
 
   await page.goto("/#/followups");
   const confirmedTaylor = page.locator("article", { hasText: "understand the privacy model" });
-  await expect(confirmedTaylor.getByText("You confirmed")).toBeVisible();
+  await expect(confirmedTaylor.getByText("You confirmed", { exact: true })).toBeVisible();
   await confirmedTaylor.getByRole("link", { name: "Open person" }).click();
   await expect(page.getByText(/taylor@example\.invalid on email \(Linked/)).toBeVisible();
   await expect(page.getByText(/Needs reply \/ Open/)).toBeVisible();

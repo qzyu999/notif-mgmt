@@ -315,7 +315,7 @@ textarea {
 
 button,
 .button {
-  min-height: 2.15rem;
+  min-height: 2.75rem;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   background: var(--surface-raised);
@@ -713,5 +713,195 @@ label {
   .create-person-row {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+/* Today workflow polish pass. Presentation only; the reading order is
+   who contacted you, what happened, why it matters, what you can do next. */
+.section-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.section-heading h2 {
+  margin: 0;
+}
+
+.count-chip {
+  display: inline-grid;
+  min-width: 1.6rem;
+  height: 1.6rem;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 0 var(--space-1);
+}
+
+.section-strong h2 {
+  font-size: 1.45rem;
+}
+
+.section-quiet h2 {
+  color: var(--ink-muted);
+  font-size: 1.15rem;
+}
+
+.section-quiet .section-description {
+  font-size: 0.95rem;
+}
+
+.today-summary {
+  border-radius: var(--radius-md);
+  font-variant-numeric: tabular-nums;
+}
+
+.feedback {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.feedback-dismiss {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  border-color: transparent;
+  background: transparent;
+  color: inherit;
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0;
+}
+
+.card-list {
+  gap: var(--space-3);
+}
+
+.followup-card {
+  padding: var(--space-4) var(--space-5);
+}
+
+.followup-card.card-candidate {
+  border-left-color: var(--candidate-border);
+}
+
+.followup-card.card-confirmed {
+  border-left-color: var(--confirmed-border);
+}
+
+.followup-card.card-withdrawn {
+  border-left-color: var(--withdrawn-border);
+}
+
+.card-heading h3 {
+  font-size: 1.5rem;
+  letter-spacing: -0.01em;
+}
+
+.card-meta,
+.inference-line {
+  font-variant-numeric: tabular-nums;
+}
+
+.context-block > p {
+  max-width: 68ch;
+  font-size: 1.02rem;
+  line-height: 1.55;
+}
+
+.why-block {
+  margin-top: var(--space-3);
+  border-left: 3px solid var(--border-strong);
+  padding-left: var(--space-3);
+}
+
+.why-block p {
+  margin: var(--space-1) 0;
+  max-width: 68ch;
+}
+
+.why-label,
+.resolver-step {
+  color: var(--ink-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.card-actions .button,
+.card-actions a.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.75rem;
+}
+
+.action-hint {
+  margin: var(--space-2) 0 0;
+  color: var(--ink-muted);
+  font-size: 0.88rem;
+  max-width: 68ch;
+}
+
+.resolver-step {
+  margin: var(--space-3) 0 var(--space-2);
+}
+
+.selected-chip {
+  display: inline-flex;
+  border: 1px solid var(--confirmed-border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--confirmed);
+  font-weight: 700;
+  padding: var(--space-1) var(--space-2);
+}
+
+.name-only-callout {
+  border: 1px dashed var(--inference-border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--inference);
+  font-weight: 650;
+  padding: var(--space-3);
+}
+
+.resolution-confirmation:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+@media (max-width: 760px) {
+  .followup-card {
+    padding: var(--space-4);
+  }
+
+  .card-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card-actions .button-primary,
+  .card-actions a.button {
+    grid-column: 1 / -1;
+  }
+
+  .card-actions .button,
+  .card-actions a.button {
+    width: 100%;
+  }
+
+  .create-person-row input,
+  .resolver input {
+    width: 100%;
+    min-height: 2.75rem;
   }
 }
