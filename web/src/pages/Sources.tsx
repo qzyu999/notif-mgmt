@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import { api } from "../api";
+import { EmptyState, ErrorState, LoadingState } from "../components/ui";
 import type { SourceStatus } from "../types";
 
 export default function Sources() {
@@ -11,8 +12,8 @@ export default function Sources() {
     api.sources().then(setSources).catch(() => setError("Could not load sources"));
   }, []);
 
-  if (error) return <p role="alert">{error}</p>;
-  if (!sources) return <p>Loading…</p>;
+  if (error) return <ErrorState message={error} />;
+  if (!sources) return <LoadingState />;
   return (
     <main>
       <h1>Sources</h1>
@@ -25,7 +26,7 @@ export default function Sources() {
         </small>
       </p>
       {sources.length === 0 ? (
-        <p>No sync state yet. Connect a source from the command line first.</p>
+        <EmptyState>No sync state yet. Connect a source from the command line first.</EmptyState>
       ) : (
         <ul>
           {sources.map((source) => (

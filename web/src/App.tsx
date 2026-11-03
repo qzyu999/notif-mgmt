@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 
+import AppShell from "./components/AppShell";
 import FollowUps from "./pages/FollowUps";
 import People from "./pages/People";
 import PersonDetail from "./pages/PersonDetail";
@@ -30,13 +31,5 @@ export default function App() {
   } else {
     page = <Today />;
   }
-  return (
-    <div>
-      <nav aria-label="Primary">
-        <a href="#/today">Today</a> <a href="#/people">People</a>{" "}
-        <a href="#/followups">Follow-ups</a> <a href="#/sources">Sources</a>
-      </nav>
-      {page}
-    </div>
-  );
+  return <AppShell route={route}>{page}</AppShell>;
 }

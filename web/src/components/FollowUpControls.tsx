@@ -1,5 +1,6 @@
 import { api } from "../api";
 import type { FollowUp } from "../types";
+import { Button } from "./ui";
 
 function snoozeUntil(): string {
   const date = new Date(Date.now() + 7 * 24 * 3600 * 1000);
@@ -17,34 +18,27 @@ export default function FollowUpControls({
     api.updateFollowUp(followup.id, changes).then(onChanged);
   const resolved = followup.status === "done" || followup.status === "dismissed";
   return (
-    <span>
+    <span className="followup-controls">
       {!resolved && (
         <>
-          <button type="button" onClick={act({ status: "done" })}>
-            Done
-          </button>
-          <button type="button" onClick={act({ status: "dismissed" })}>
+          <Button onClick={act({ status: "done" })}>Done</Button>
+          <Button variant="quiet" onClick={act({ status: "dismissed" })}>
             Dismiss
-          </button>
+          </Button>
           {followup.status !== "snoozed" && (
-            <button
-              type="button"
+            <Button
               onClick={act({ status: "snoozed", snoozed_until: snoozeUntil() })}
             >
               Snooze 7 days
-            </button>
+            </Button>
           )}
         </>
       )}
-      {resolved && (
-        <button type="button" onClick={act({ status: "open" })}>
-          Reopen
-        </button>
-      )}
+      {resolved && <Button onClick={act({ status: "open" })}>Reopen</Button>}
       {followup.kind === "review" && !resolved && (
-        <button type="button" onClick={act({ kind: "reply" })}>
+        <Button variant="primary" onClick={act({ kind: "reply" })}>
           Mark as needs reply
-        </button>
+        </Button>
       )}
     </span>
   );

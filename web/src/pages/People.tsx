@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { api } from "../api";
+import { ErrorState, LoadingState } from "../components/ui";
 import type { PersonSummary, PlatformIdentity } from "../types";
 
 export default function People() {
@@ -20,8 +21,8 @@ export default function People() {
 
   useEffect(load, [load]);
 
-  if (error) return <p role="alert">{error}</p>;
-  if (!people) return <p>Loading…</p>;
+  if (error) return <ErrorState message={error} />;
+  if (!people) return <LoadingState />;
   return (
     <main>
       <h1>People</h1>
