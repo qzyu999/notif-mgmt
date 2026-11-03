@@ -27,6 +27,14 @@ def test_sync_without_credentials_gives_guidance(tmp_path, monkeypatch, capsys):
 
 
 def test_auth_without_google_libraries_gives_guidance(tmp_path, monkeypatch, capsys):
+    import notif_mgmt.gmail as gmail_module
+
+    def missing_libs(store, credentials):
+        raise ImportError("No module named 'google'")
+
+    # Simulate the [gmail] extra being absent regardless of what is installed
+    # in the current environment; the CLI must print install guidance.
+    monkeypatch.setattr(gmail_module, "authorize", missing_libs)
     out = run(monkeypatch, capsys, "auth", "--credentials", str(tmp_path / "creds.json"))
     assert "pip install" in out and "[gmail]" in out
 
