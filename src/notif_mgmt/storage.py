@@ -211,10 +211,10 @@ def _migrate(db: sqlite3.Connection) -> None:
     db.commit()
 
 
-def connect(path: str | Path) -> sqlite3.Connection:
+def connect(path: str | Path, check_same_thread: bool = True) -> sqlite3.Connection:
     path = Path(path).expanduser()
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    db = sqlite3.connect(str(path))
+    db = sqlite3.connect(str(path), check_same_thread=check_same_thread)
     if os.name == "posix":
         path.chmod(0o600)
     db.row_factory = sqlite3.Row
@@ -460,18 +460,9 @@ def insert_signal(db: sqlite3.Connection, *, source_event_id: int,
         "SELECT * FROM interaction_signals WHERE id=?", (signal_id,)).fetchone()))
 
 
-def list_signals(db: sqlite3.Connection, person_id: int | None = None) -> list[InteractionSignal]:
+def list_signals(db: sqlite3.Connection, person_id: int | None = None,
+                 status: str | None = None) -> list[InteractionSignal]:
     query = "SELECT * FROM interaction_signals"
-    args: tuple = ()
-    if person_id is not None:
-        query += " WHERE person_id=?"
-        args = (person_id,)
-    query += " ORDER BY occurred_at, id"
-    return [InteractionSignal(**dict(r)) for r in db.execute(query, args)]
-
-
-def list_followups(db: sqlite3.Connection, person_id: int | None = None,
-                   status: str | None = None) -> list[FollowUp]:
     clauses, args = [], []
     if person_id is not None:
         clauses.append("person_id=?")
@@ -479,8 +470,110 @@ def list_followups(db: sqlite3.Connection, person_id: int | None = None,
     if status is not None:
         clauses.append("status=?")
         args.append(status)
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY occurred_at, id"
+    return [InteractionSignal(**dict(r)) for r in db.execute(query, tuple(args))]
+
+
+def list_followups(db: sqlite3.Connection, person_id: int | None = None,
+                   status: str | None = None, kind: str | None = None) -> list[FollowUp]:
+    clauses, args = [], []
+    if person_id is not None:
+        clauses.append("person_id=?")
+        args.append(person_id)
+    if status is not None:
+        clauses.append("status=?")
+        args.append(status)
+    if kind is not None:
+        clauses.append("kind=?")
+        args.append(kind)
     query = "SELECT * FROM followups"
     if clauses:
         query += " WHERE " + " AND ".join(clauses)
     query += " ORDER BY created_at, id"
     return [FollowUp(**dict(r)) for r in db.execute(query, tuple(args))]
+
+
+# --- A5a read queries ---------------------------------------------------------
+
+
+def get_person(db: sqlite3.Connection, person_id: int) -> Person | None:
+    row = db.execute("SELECT * FROM people WHERE id=?", (person_id,)).fetchone()
+    return Person(**dict(row)) if row else None
+
+
+def list_identities(db: sqlite3.Connection, match_status: str | None = None,
+                    person_id: int | None = None) -> list[PlatformIdentity]:
+    clauses, args = [], []
+    if match_status is not None:
+        clauses.append("match_status=?")
+        args.append(match_status)
+    if person_id is not None:
+        clauses.append("person_id=?")
+        args.append(person_id)
+    query = "SELECT * FROM identities"
+    if clauses:
+        query += " WHERE " + " AND ".join(clauses)
+    query += " ORDER BY platform, value_normalized, id"
+    return [PlatformIdentity(**dict(r)) for r in db.execute(query, tuple(args))]
+
+
+def list_people_with_stats(db: sqlite3.Connection) -> list[dict]:
+    """People plus identity/platform/activity aggregates for list views."""
+    people = []
+    for person in list_people(db):
+        identities = list_identities(db, person_id=person.id)
+        signals = list_signals(db, person_id=person.id)
+        platforms = sorted({i.platform for i in identities}
+                           | {s.platform for s in signals})
+        people.append({
+            **person.model_dump(),
+            "identity_count": len(identities),
+            "platforms": platforms,
+            "last_interaction_at": max((s.occurred_at for s in signals), default=None),
+            "open_followup_count": len(list_followups(db, person_id=person.id,
+                                                      status="open")),
+        })
+    return people
+
+
+def today_followups(db: sqlite3.Connection, now: str) -> dict[str, list[FollowUp]]:
+    """Group follow-ups needing attention at `now` (ISO 8601 UTC string).
+
+    Confirmed obligations and expired snoozes come first; notification-derived
+    review candidates are reported separately and never presented as replies
+    owed. ISO strings compare lexicographically, matching storage format.
+    """
+    followups = list_followups(db)
+    due = [f for f in followups
+           if f.status == "open" and f.due_at is not None and f.due_at <= now]
+    due_ids = {f.id for f in due}
+    snoozed_ready = [f for f in followups
+                     if f.status == "snoozed" and f.snoozed_until is not None
+                     and f.snoozed_until <= now]
+    review_candidates = [f for f in followups
+                         if f.status == "open" and f.kind == "review"
+                         and f.id not in due_ids]
+    return {"due": due, "snoozed_ready": snoozed_ready,
+            "review_candidates": review_candidates}
+
+
+def list_sources(db: sqlite3.Connection) -> list[dict]:
+    """Per-account sync metadata for the Sources view. Never includes secrets."""
+    sources = []
+    for row in db.execute("SELECT * FROM sync_state ORDER BY source, account_id"):
+        gaps = db.execute(
+            "SELECT count(*) FROM sync_gaps WHERE source=? AND account_id=?",
+            (row["source"], row["account_id"])).fetchone()[0]
+        sources.append({
+            "source": row["source"],
+            "account_id": row["account_id"],
+            "has_cursor": row["cursor"] is not None,
+            "last_sync_completed_at": row["last_sync_completed_at"],
+            "last_error_code": row["last_error_code"],
+            "last_error_message": row["last_error_message"],
+            "last_recovery_at": row["last_recovery_at"],
+            "gap_count": gaps,
+        })
+    return sources

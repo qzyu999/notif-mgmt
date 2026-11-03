@@ -60,6 +60,25 @@ Deferred until needed: suggested matches, reversible merge workflows, cross-plat
 
 See `docs/gmail-oauth.md` for operator setup.
 
+## Web API (A5, in progress)
+
+- **A5a (implemented):** `src/notif_mgmt/api.py` is a thin FastAPI layer over
+  the storage repositories and Pydantic domain models — no ORM, no new
+  tables. Read-only `/api/v1` endpoints: `today` (due / snoozed-ready /
+  review-candidates, grouped separately so candidates are never presented as
+  obligations), `people` (with identity/platform/activity aggregates),
+  `people/{id}` (identities, newest-first signal timeline, follow-ups),
+  `identities`, `followups`, `signals`, `sources` (sync metadata + gap
+  counts, never secrets). Unknown person returns 404.
+- Mutations (identity linking, follow-up state management) arrive in A5b
+  behind the same versioned prefix; the React/TypeScript/Vite frontend
+  follows in A5c–A5e.
+- Deployment is single-user local: bind to localhost only, database path via
+  `NOTIF_MGMT_DB`. The API returns capped summaries and metadata only.
+- A signal's `platform` reflects A3 sender-domain matching against trusted
+  platform domains. It is **not** SPF/DKIM/DMARC authentication of message
+  origin, and UI copy must not claim otherwise.
+
 ## Parser registry (A3)
 
 Deterministic parsers live in `parsing.py` behind a versioned registry
