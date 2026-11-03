@@ -13,11 +13,13 @@ import os
 import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import storage
@@ -104,8 +106,11 @@ def _storage_error(error: ValueError) -> HTTPException:
 
 
 def create_app(db_path: str | None = None,
-               allowed_hosts: frozenset[str] = frozenset(_LOCAL_HOSTS)) -> FastAPI:
+               allowed_hosts: frozenset[str] = frozenset(_LOCAL_HOSTS),
+               static_dir: str | Path | None = None) -> FastAPI:
     path = db_path or os.environ.get("NOTIF_MGMT_DB", "./dev.db")
+    dist = (Path(static_dir) if static_dir is not None
+            else Path(__file__).parents[2] / "web" / "dist")
     app = FastAPI(title="notif-mgmt", version="1")
 
     @app.middleware("http")
@@ -234,6 +239,12 @@ def create_app(db_path: str | None = None,
             return storage.update_followup(db, followup_id, **changes)
         except ValueError as error:
             raise _storage_error(error) from error
+
+    # Mounted last so /api/v1 routes keep precedence. Serves the production
+    # React build (web/dist) for a single-process local app when it exists;
+    # API-only use works unchanged without a build.
+    if dist.is_dir():
+        app.mount("/", StaticFiles(directory=dist, html=True), name="static")
 
     return app
 

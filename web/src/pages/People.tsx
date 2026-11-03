@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { api } from "../api";
 import type { PersonSummary, PlatformIdentity } from "../types";
@@ -7,8 +7,9 @@ export default function People() {
   const [people, setPeople] = useState<PersonSummary[] | null>(null);
   const [unresolved, setUnresolved] = useState<PlatformIdentity[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState("");
 
-  useEffect(() => {
+  const load = useCallback(() => {
     Promise.all([api.people(), api.identities("unmatched")])
       .then(([peopleResult, identityResult]) => {
         setPeople(peopleResult);
@@ -17,11 +18,34 @@ export default function People() {
       .catch(() => setError("Could not load people"));
   }, []);
 
+  useEffect(load, [load]);
+
   if (error) return <p role="alert">{error}</p>;
   if (!people) return <p>Loading…</p>;
   return (
     <main>
       <h1>People</h1>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (name.trim()) {
+            api.createPerson(name.trim()).then(() => {
+              setName("");
+              load();
+            });
+          }
+        }}
+      >
+        <label>
+          New person{" "}
+          <input
+            aria-label="New person name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+          />
+        </label>
+        <button type="submit">Create person</button>
+      </form>
       {people.length === 0 ? (
         <p>No people yet. Link an identity or assign a signal to create one.</p>
       ) : (

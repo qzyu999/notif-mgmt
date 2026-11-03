@@ -89,8 +89,15 @@ See `docs/gmail-oauth.md` for operator setup.
   assignment, newest-first timeline with parser provenance, in-place
   follow-up controls), the Follow-ups triage page with status filter, and
   the Sources page (sync metadata plus explicit sender-domain, not
-  SPF/DKIM/DMARC, language). Production assets are served by FastAPI in
-  A5e.
+  SPF/DKIM/DMARC, language).
+- **A5e (implemented):** FastAPI mounts the production React build
+  (`web/dist`, created by `cd web && npm run build`) after the API routes
+  for a single-process local app; without a build the API works unchanged.
+  A Playwright golden-path test (review candidate → create person → link
+  identity → complete follow-up) runs against a throwaway synthetic
+  database seeded by the CLI demo. Run everything locally with
+  `python -m pip install -e '.[web]'`, `cd web && npm install && npm run build`,
+  then `NOTIF_MGMT_DB=<path> uvicorn notif_mgmt.api:app --host 127.0.0.1`.
 - Deployment is single-user local: bind to localhost only, database path via
   `NOTIF_MGMT_DB`. The API returns capped summaries and metadata only.
 - A signal's `platform` reflects A3 sender-domain matching against trusted
