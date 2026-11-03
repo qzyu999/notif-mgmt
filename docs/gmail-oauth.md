@@ -145,3 +145,42 @@ any crash. Report the exact output before proceeding.
 
 Polling, external AI inference, and automatic outreach remain disabled. This
 procedure is one-shot and manual by design.
+
+## Live acceptance progress
+
+Environment: dedicated test mailbox, OAuth authorized through Step 7, test
+database `/tmp/notif-mgmt-smoke.db`, no other database or account involved.
+
+- **Initial bounded sync passed (2026-11-02).** Query window 30 days.
+  Result was fetched 7, new 7, duplicates 0, deleted 0, recovered false.
+  All three synthetic seed messages were imported, including the
+  LinkedIn-style notification from Alex. Seven interaction signals and seven
+  review/open follow-up candidates were created. Sync state showed cursor
+  2281, last_error None, gaps 0.
+- **Incremental idempotency passed.** An immediate second sync reported
+  fetched 0, new 0, duplicates 0, deleted 0, recovered false. The cursor
+  remained 2281, all seven review candidates were unchanged, and no errors or
+  recovery gaps were recorded.
+- **New-message incremental ingestion passed.** A second sync after new mail
+  arrived reported fetched 2, new 2, duplicates 0, deleted 0, recovered
+  false. The cursor advanced from 2281 to 2464 and signals increased from 7
+  to 9. One imported item was the new `A2 smoke incremental` test email and
+  the other was an additional Google notification, which accounts for the
+  second new message. last_error remained None and gaps remained 0.
+- **Trash-no-withdrawal passed.** After the `A2 smoke delete me` message was
+  moved to Trash, sync reported fetched 0, new 0, duplicates 0, deleted 0,
+  recovered false. A direct database check confirmed its signal (id 1)
+  remained `active`, so a label change was not misread as deletion.
+- **Permanent-delete-withdrawal passed.** After `A2 smoke delete me` was
+  permanently deleted from Trash, sync reported fetched 0, new 0,
+  duplicates 0, deleted 1, recovered false. Its signal (id 1) is now
+  `withdrawn`; all other signals remain `active`. The signal row still joins
+  to its `inbound_events` evidence row, proving the historical evidence was
+  preserved and only the inferred signal state changed.
+
+**A2 live acceptance is complete for the dedicated test mailbox**: bounded
+initial sync, incremental idempotency, new-message ingestion, Trash treated as
+a label change, and permanent deletion treated as signal withdrawal all behave
+as specified against the real Gmail API, read-only, with no polling and no
+external inference. Live OAuth remains limited to the test account; any use
+beyond it requires a separate decision.
