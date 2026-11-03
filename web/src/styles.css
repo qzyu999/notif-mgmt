@@ -1,0 +1,22 @@
+/* Minimal functional styling only. Deliberate visual design is Phase B. */
+:root {
+  font-family: system-ui, sans-serif;
+  color-scheme: light dark;
+}
+body {
+  margin: 1rem auto;
+  max-width: 60rem;
+  padding: 0 1rem;
+}
+nav a {
+  margin-right: 0.75rem;
+}
+section {
+  margin-top: 1.5rem;
+}
+small {
+  opacity: 0.75;
+}
+button {
+  margin-left: 0.5rem;
+}

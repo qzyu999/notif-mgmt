@@ -79,7 +79,13 @@ See `docs/gmail-oauth.md` for operator setup.
   `snoozed_until` are explicitly clearable. Mutations are guarded by a
   localhost Host check plus a localhost Origin check when Origin is sent —
   CORS alone is not treated as a security boundary.
-- The React/TypeScript/Vite frontend follows in A5c–A5e.
+- The React/TypeScript/Vite frontend lives in `web/` with a hand-typed API
+  client and hash routing.
+- **A5c (implemented):** app shell plus Today (due / expired snoozes /
+  review candidates) and People (summaries + unresolved-identity queue)
+  pages, with Vitest component tests against a mocked API client. Person
+  Detail, Follow-ups, and Sources complete in A5d; production assets are
+  served by FastAPI in A5e.
 - Deployment is single-user local: bind to localhost only, database path via
   `NOTIF_MGMT_DB`. The API returns capped summaries and metadata only.
 - A signal's `platform` reflects A3 sender-domain matching against trusted

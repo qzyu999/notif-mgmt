@@ -19,3 +19,5 @@ client_secret*.json
 .DS_Store
 private_data/
 exports/
+node_modules/
+web/dist/
