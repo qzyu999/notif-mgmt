@@ -14,9 +14,11 @@ import sqlite3
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Annotated
+from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from . import storage
 from .models import FollowUp, InteractionSignal, Person, PlatformIdentity
@@ -53,9 +55,68 @@ class SourceStatus(BaseModel):
     gap_count: int
 
 
-def create_app(db_path: str | None = None) -> FastAPI:
+class PersonCreate(BaseModel):
+    display_name: str = Field(min_length=1)
+    kind: str = "person"
+    notes: str = ""
+
+
+class IdentityCreate(BaseModel):
+    platform: str = Field(min_length=1)
+    identity_kind: str = Field(min_length=1)
+    value: str = Field(min_length=1)
+
+
+class PersonRef(BaseModel):
+    person_id: int
+
+
+class FollowUpUpdate(BaseModel):
+    status: str | None = None
+    kind: str | None = None
+    note: str | None = None
+    due_at: str | None = None
+    snoozed_until: str | None = None
+
+
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
+def _hostname(host_header: str) -> str:
+    host = host_header.strip().lower()
+    if host.startswith("["):
+        return host[1:].split("]", 1)[0]
+    return host.rsplit(":", 1)[0] if ":" in host else host
+
+
+def _storage_error(error: ValueError) -> HTTPException:
+    message = str(error)
+    if message.startswith("Unknown"):
+        return HTTPException(status_code=404, detail=message)
+    if "already linked" in message or "already owned" in message:
+        return HTTPException(status_code=409, detail=message)
+    return HTTPException(status_code=422, detail=message)
+
+
+def create_app(db_path: str | None = None,
+               allowed_hosts: frozenset[str] = frozenset(_LOCAL_HOSTS)) -> FastAPI:
     path = db_path or os.environ.get("NOTIF_MGMT_DB", "./dev.db")
     app = FastAPI(title="notif-mgmt", version="1")
+
+    @app.middleware("http")
+    async def local_mutation_guard(request: Request, call_next):
+        # CORS alone is not a boundary: mutations require a localhost Host,
+        # and a localhost Origin when the browser sends one (DNS-rebinding
+        # and cross-site form/fetch protection for the local app).
+        if request.method in {"POST", "PATCH", "PUT", "DELETE"}:
+            if _hostname(request.headers.get("host", "")) not in allowed_hosts:
+                return JSONResponse({"detail": "Mutations are localhost-only"},
+                                    status_code=403)
+            origin = request.headers.get("origin")
+            if origin and urlparse(origin).hostname not in allowed_hosts:
+                return JSONResponse({"detail": "Foreign Origin rejected"},
+                                    status_code=403)
+        return await call_next(request)
 
     def get_db() -> Iterator[sqlite3.Connection]:
         db = storage.connect(path, check_same_thread=False)
@@ -104,6 +165,58 @@ def create_app(db_path: str | None = None) -> FastAPI:
     @app.get("/api/v1/sources", response_model=list[SourceStatus])
     def sources(db: Db):
         return storage.list_sources(db)
+
+    @app.post("/api/v1/people", response_model=Person, status_code=201)
+    def create_person(body: PersonCreate, db: Db):
+        return storage.create_person(db, body.display_name, kind=body.kind,
+                                     notes=body.notes)
+
+    @app.post("/api/v1/people/{person_id}/identities",
+              response_model=PlatformIdentity, status_code=201)
+    def add_identity(person_id: int, body: IdentityCreate, db: Db):
+        if storage.get_person(db, person_id) is None:
+            raise HTTPException(status_code=404, detail="Unknown person")
+        try:
+            return storage.add_identity(db, person_id, platform=body.platform,
+                                        identity_kind=body.identity_kind,
+                                        value=body.value)
+        except ValueError as error:
+            raise _storage_error(error) from error
+
+    @app.post("/api/v1/identities/{identity_id}/link",
+              response_model=PlatformIdentity)
+    def link_identity(identity_id: int, body: PersonRef, db: Db):
+        identity = storage.get_identity(db, identity_id)
+        if identity is None or storage.get_person(db, body.person_id) is None:
+            raise HTTPException(status_code=404, detail="Unknown identity or person")
+        if identity.person_id not in (None, body.person_id):
+            raise HTTPException(
+                status_code=409, detail="Identity already linked to another person")
+        storage.link_identity(db, identity_id, body.person_id)
+        return storage.get_identity(db, identity_id)
+
+    @app.post("/api/v1/signals/{signal_id}/assign",
+              response_model=InteractionSignal)
+    def assign_signal(signal_id: int, body: PersonRef, db: Db):
+        try:
+            storage.assign_signal_person(db, signal_id, body.person_id)
+        except ValueError as error:
+            raise _storage_error(error) from error
+        row = next((s for s in storage.list_signals(db) if s.id == signal_id), None)
+        return row
+
+    @app.patch("/api/v1/followups/{followup_id}", response_model=FollowUp)
+    def update_followup(followup_id: int, body: FollowUpUpdate, db: Db):
+        changes: dict = {"status": body.status, "kind": body.kind,
+                         "note": body.note}
+        if "due_at" in body.model_fields_set:
+            changes["due_at"] = body.due_at
+        if "snoozed_until" in body.model_fields_set:
+            changes["snoozed_until"] = body.snoozed_until
+        try:
+            return storage.update_followup(db, followup_id, **changes)
+        except ValueError as error:
+            raise _storage_error(error) from error
 
     return app
 

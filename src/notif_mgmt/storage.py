@@ -503,6 +503,74 @@ def get_person(db: sqlite3.Connection, person_id: int) -> Person | None:
     return Person(**dict(row)) if row else None
 
 
+def get_identity(db: sqlite3.Connection, identity_id: int) -> PlatformIdentity | None:
+    row = db.execute("SELECT * FROM identities WHERE id=?", (identity_id,)).fetchone()
+    return PlatformIdentity(**dict(row)) if row else None
+
+
+_FOLLOWUP_STATUSES = {"open", "snoozed", "done", "dismissed"}
+_FOLLOWUP_KINDS = {"review", "reply", "waiting", "follow_up"}
+_FOLLOWUP_TRANSITIONS = {
+    "open": {"snoozed", "done", "dismissed"},
+    "snoozed": {"open", "done", "dismissed"},
+    "done": {"open"},
+    "dismissed": {"open"},
+}
+_UNSET = object()
+
+
+def update_followup(db: sqlite3.Connection, followup_id: int, *,
+                    status: str | None = None, kind: str | None = None,
+                    note: str | None = None, due_at=_UNSET,
+                    snoozed_until=_UNSET) -> FollowUp:
+    """Apply a follow-up state transition with timestamp bookkeeping.
+
+    done/dismissed stamp resolved_at; reopening clears it. Snoozing requires
+    an effective snoozed_until; leaving snoozed clears it unless a new one is
+    given. due_at/snoozed_until use a sentinel so callers can explicitly
+    clear them with None. Raises ValueError on unknown id, bad values, or an
+    illegal transition (resolved items must reopen before snoozing).
+    """
+    row = db.execute("SELECT * FROM followups WHERE id=?", (followup_id,)).fetchone()
+    if row is None:
+        raise ValueError(f"Unknown followup id {followup_id}")
+    current = FollowUp(**dict(row))
+    new_status = status if status is not None else current.status
+    if new_status not in _FOLLOWUP_STATUSES:
+        raise ValueError(f"Invalid follow-up status {new_status}")
+    if (status is not None and status != current.status
+            and status not in _FOLLOWUP_TRANSITIONS[current.status]):
+        raise ValueError(
+            f"Invalid follow-up transition {current.status} -> {status}")
+    new_kind = kind if kind is not None else current.kind
+    if new_kind not in _FOLLOWUP_KINDS:
+        raise ValueError(f"Invalid follow-up kind {new_kind}")
+
+    new_snoozed = (current.snoozed_until if snoozed_until is _UNSET
+                   else snoozed_until)
+    if status is not None and new_status != "snoozed" and snoozed_until is _UNSET:
+        new_snoozed = None if current.status == "snoozed" else new_snoozed
+    if new_status == "snoozed" and not new_snoozed:
+        raise ValueError("Snoozing requires snoozed_until")
+    new_due = current.due_at if due_at is _UNSET else due_at
+
+    sets = ["status=?", "kind=?", "due_at=?", "snoozed_until=?",
+            "updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"]
+    args: list = [new_status, new_kind, new_due, new_snoozed]
+    if note is not None:
+        sets.append("note=?")
+        args.append(note)
+    if new_status in ("done", "dismissed") and current.status != new_status:
+        sets.append("resolved_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now')")
+    elif new_status == "open" and current.status in ("done", "dismissed"):
+        sets.append("resolved_at=NULL")
+    with db:
+        db.execute(f"UPDATE followups SET {', '.join(sets)} WHERE id=?",
+                   (*args, followup_id))
+    return FollowUp(**dict(db.execute(
+        "SELECT * FROM followups WHERE id=?", (followup_id,)).fetchone()))
+
+
 def list_identities(db: sqlite3.Connection, match_status: str | None = None,
                     person_id: int | None = None) -> list[PlatformIdentity]:
     clauses, args = [], []

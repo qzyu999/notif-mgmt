@@ -70,9 +70,16 @@ See `docs/gmail-oauth.md` for operator setup.
   `people/{id}` (identities, newest-first signal timeline, follow-ups),
   `identities`, `followups`, `signals`, `sources` (sync metadata + gap
   counts, never secrets). Unknown person returns 404.
-- Mutations (identity linking, follow-up state management) arrive in A5b
-  behind the same versioned prefix; the React/TypeScript/Vite frontend
-  follows in A5c–A5e.
+- **A5b (implemented):** mutation endpoints under the same prefix — create
+  person, attach exact identity, link identity (409 when owned by another
+  person), assign name-only signal, and PATCH follow-ups. Follow-up
+  transitions are a storage-level state machine: open ⇄ snoozed (snooze
+  requires `snoozed_until`), open/snoozed → done/dismissed (stamps
+  `resolved_at`), resolved → open (clears `resolved_at`); `due_at` and
+  `snoozed_until` are explicitly clearable. Mutations are guarded by a
+  localhost Host check plus a localhost Origin check when Origin is sent —
+  CORS alone is not treated as a security boundary.
+- The React/TypeScript/Vite frontend follows in A5c–A5e.
 - Deployment is single-user local: bind to localhost only, database path via
   `NOTIF_MGMT_DB`. The API returns capped summaries and metadata only.
 - A signal's `platform` reflects A3 sender-domain matching against trusted
