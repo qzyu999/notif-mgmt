@@ -434,8 +434,9 @@ def insert_signal(db: sqlite3.Connection, *, source_event_id: int,
                   identity_id: int | None, person_id: int | None, platform: str,
                   kind: str, occurred_at: str, summary: str,
                   actor_candidate: str | None, confidence: float, parser_name: str,
-                  parser_version: str, dedupe_key: str) -> InteractionSignal | None:
-    """Insert a signal plus its review candidate atomically; None if duplicate."""
+                  parser_version: str, dedupe_key: str,
+                  create_followup: bool = True) -> InteractionSignal | None:
+    """Insert a signal plus (optionally) its review candidate; None if duplicate."""
     with db:
         cur = db.execute(
             """INSERT OR IGNORE INTO interaction_signals
@@ -447,13 +448,14 @@ def insert_signal(db: sqlite3.Connection, *, source_event_id: int,
         if cur.rowcount != 1:
             return None
         signal_id = cur.lastrowid
-        actor = actor_candidate or platform
-        db.execute(
-            """INSERT INTO followups (person_id, signal_id, kind, status, title,
-               created_by, confidence)
-               VALUES (?, ?, 'review', 'open', ?, 'rule', ?)""",
-            (person_id, signal_id, f"Review {kind.replace('_', ' ')} from {actor}",
-             confidence))
+        if create_followup:
+            actor = actor_candidate or platform
+            db.execute(
+                """INSERT INTO followups (person_id, signal_id, kind, status, title,
+                   created_by, confidence)
+                   VALUES (?, ?, 'review', 'open', ?, 'rule', ?)""",
+                (person_id, signal_id, f"Review {kind.replace('_', ' ')} from {actor}",
+                 confidence))
     return InteractionSignal(**dict(db.execute(
         "SELECT * FROM interaction_signals WHERE id=?", (signal_id,)).fetchone()))
 

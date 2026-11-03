@@ -33,14 +33,21 @@ def process_event(db: sqlite3.Connection, event: InboundEvent) -> InteractionSig
             confidence=parsed.confidence)
         identity_id = identity.id
         person_id = identity.person_id  # set only on an exact/manual prior link
-    dedupe_key = (f"{event.source}:{event.account_id}:{event.external_id}:"
-                  f"{parsed.parser_name}@{parsed.parser_version}")
+    # Dedupe is scoped to the source event, not the parser: a parser upgrade
+    # replayed over old events must never mint duplicate signals/follow-ups.
+    # Historical signals keep their original parser name/version.
+    dedupe_key = f"{event.source}:{event.account_id}:{event.external_id}"
+    # Only interaction-shaped kinds ask for human review; automated and
+    # unclassified mail is kept as evidence without a follow-up candidate.
+    create_followup = parsed.kind in {
+        "direct_message_notification", "platform_activity", "direct_email"}
     return insert_signal(
         db, source_event_id=row["id"], identity_id=identity_id, person_id=person_id,
         platform=parsed.platform, kind=parsed.kind, occurred_at=event.received_at,
         summary=parsed.summary, actor_candidate=parsed.actor_candidate,
         confidence=parsed.confidence, parser_name=parsed.parser_name,
-        parser_version=parsed.parser_version, dedupe_key=dedupe_key)
+        parser_version=parsed.parser_version, dedupe_key=dedupe_key,
+        create_followup=create_followup)
 
 
 def process_unprocessed_events(db: sqlite3.Connection, *, source: str,
