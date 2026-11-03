@@ -118,12 +118,15 @@ the next derivation reuses them. Manual assignments, confirmed
 obligations, withdrawn signals, and dismissed candidates are not reset
 by repair or replay.
 
-One narrower window remains documented rather than overstated. A message
+One narrower window remains open as deferred engineering work. A message
 first added and permanently deleted inside the same previously unseen
 history batch has no stored signal for the batch withdrawal to act on,
-so its post-commit derivation can still create an active signal. That
-window does not affect the atomicity of events, derived-state withdrawals,
-dismissals, and cursor advancement for previously stored events.
+so its post-commit derivation can still create an active signal. This is
+not a resolved guarantee. Closing it would require deletion tombstones
+for previously unseen events or an equivalent derivation-suppression
+mechanism. That window does not affect the atomicity of events,
+derived-state withdrawals, dismissals, and cursor advancement for
+previously stored events.
 
 ## Expired-cursor recovery atomicity (A6-5)
 
