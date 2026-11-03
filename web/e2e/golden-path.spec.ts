@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 // review candidate -> create person -> link identity -> complete follow-up.
 test("manual triage golden path", async ({ page }) => {
   await page.goto("/#/followups");
-  await expect(page.getByText(/Review direct message/)).toBeVisible();
+  await expect(page.getByText(/Direct message notification via LinkedIn/)).toBeVisible();
 
   await page.goto("/#/people");
   await page.getByLabel("New person name").fill("Taylor");
@@ -16,7 +16,7 @@ test("manual triage golden path", async ({ page }) => {
     .getByRole("button", { name: "Link to Taylor" })
     .first()
     .click();
-  await expect(page.getByText(/taylor@example\.invalid on email \(verified/))
+  await expect(page.getByText(/taylor@example\.invalid on email \(Linked/))
     .toBeVisible();
 
   await page.goto("/#/followups");
@@ -29,7 +29,7 @@ test("manual triage golden path", async ({ page }) => {
     .toBeVisible();
 
   await page.goto("/#/today");
-  await expect(page.getByText("Review candidates")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Review candidates" })).toBeVisible();
   await page.goto("/#/sources");
   await expect(page.getByText(/sender-domain matching/)).toBeVisible();
 });

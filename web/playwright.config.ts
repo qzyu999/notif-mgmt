@@ -5,6 +5,7 @@ import { defineConfig } from "@playwright/test";
 //   npx playwright install chromium
 export default defineConfig({
   testDir: "./e2e",
+  workers: 1, // E2E specs share one synthetic database and mutate it deliberately.
   use: { baseURL: "http://127.0.0.1:5173" },
   webServer: [
     {
