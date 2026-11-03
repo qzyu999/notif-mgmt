@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 
+import FollowUps from "./pages/FollowUps";
 import People from "./pages/People";
+import PersonDetail from "./pages/PersonDetail";
+import Sources from "./pages/Sources";
 import Today from "./pages/Today";
 
 function useHashRoute(): string {
@@ -17,13 +20,13 @@ export default function App() {
   const route = useHashRoute();
   let page: React.ReactNode;
   if (route.startsWith("#/people/")) {
-    page = <p>Person detail arrives in the next milestone.</p>;
+    page = <PersonDetail personId={Number(route.split("/")[2])} />;
   } else if (route === "#/people") {
     page = <People />;
   } else if (route === "#/followups") {
-    page = <p>Follow-ups arrive in the next milestone.</p>;
+    page = <FollowUps />;
   } else if (route === "#/sources") {
-    page = <p>Sources arrive in the next milestone.</p>;
+    page = <Sources />;
   } else {
     page = <Today />;
   }

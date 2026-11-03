@@ -83,9 +83,14 @@ See `docs/gmail-oauth.md` for operator setup.
   client and hash routing.
 - **A5c (implemented):** app shell plus Today (due / expired snoozes /
   review candidates) and People (summaries + unresolved-identity queue)
-  pages, with Vitest component tests against a mocked API client. Person
-  Detail, Follow-ups, and Sources complete in A5d; production assets are
-  served by FastAPI in A5e.
+  pages, with Vitest component tests against a mocked API client.
+- **A5d (implemented):** Person Detail (notes editing via
+  `PATCH /api/v1/people/{id}`, identity linking, name-only signal
+  assignment, newest-first timeline with parser provenance, in-place
+  follow-up controls), the Follow-ups triage page with status filter, and
+  the Sources page (sync metadata plus explicit sender-domain, not
+  SPF/DKIM/DMARC, language). Production assets are served by FastAPI in
+  A5e.
 - Deployment is single-user local: bind to localhost only, database path via
   `NOTIF_MGMT_DB`. The API returns capped summaries and metadata only.
 - A signal's `platform` reflects A3 sender-domain matching against trusted

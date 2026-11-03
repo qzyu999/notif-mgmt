@@ -508,6 +508,25 @@ def get_identity(db: sqlite3.Connection, identity_id: int) -> PlatformIdentity |
     return PlatformIdentity(**dict(row)) if row else None
 
 
+def update_person(db: sqlite3.Connection, person_id: int, *,
+                  display_name: str | None = None,
+                  notes: str | None = None) -> Person:
+    """Update person display name and/or notes. Raises ValueError if unknown."""
+    person = get_person(db, person_id)
+    if person is None:
+        raise ValueError(f"Unknown person id {person_id}")
+    new_name = person.display_name if display_name is None else display_name.strip()
+    if not new_name:
+        raise ValueError("display_name must not be empty")
+    new_notes = person.notes if notes is None else notes
+    with db:
+        db.execute(
+            """UPDATE people SET display_name=?, notes=?,
+               updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id=?""",
+            (new_name, new_notes, person_id))
+    return get_person(db, person_id)
+
+
 _FOLLOWUP_STATUSES = {"open", "snoozed", "done", "dismissed"}
 _FOLLOWUP_KINDS = {"review", "reply", "waiting", "follow_up"}
 _FOLLOWUP_TRANSITIONS = {

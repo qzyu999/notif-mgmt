@@ -1,5 +1,6 @@
 import type {
   FollowUp,
+  InteractionSignal,
   Person,
   PersonDetail,
   PersonSummary,
@@ -35,6 +36,7 @@ export const api = {
     const query = new URLSearchParams(params).toString();
     return get<FollowUp[]>(`/api/v1/followups${query ? `?${query}` : ""}`);
   },
+  signals: () => get<InteractionSignal[]>("/api/v1/signals"),
   sources: () => get<SourceStatus[]>("/api/v1/sources"),
   createPerson: (displayName: string, notes = "") =>
     send<Person>("POST", "/api/v1/people", {
@@ -51,4 +53,8 @@ export const api = {
     }),
   updateFollowUp: (id: number, changes: Partial<FollowUp>) =>
     send<FollowUp>("PATCH", `/api/v1/followups/${id}`, changes),
+  updatePerson: (
+    id: number,
+    changes: { display_name?: string; notes?: string },
+  ) => send<Person>("PATCH", `/api/v1/people/${id}`, changes),
 };

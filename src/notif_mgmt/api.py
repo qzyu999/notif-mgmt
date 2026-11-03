@@ -71,6 +71,11 @@ class PersonRef(BaseModel):
     person_id: int
 
 
+class PersonUpdate(BaseModel):
+    display_name: str | None = None
+    notes: str | None = None
+
+
 class FollowUpUpdate(BaseModel):
     status: str | None = None
     kind: str | None = None
@@ -170,6 +175,18 @@ def create_app(db_path: str | None = None,
     def create_person(body: PersonCreate, db: Db):
         return storage.create_person(db, body.display_name, kind=body.kind,
                                      notes=body.notes)
+
+    @app.patch("/api/v1/people/{person_id}", response_model=Person)
+    def update_person(person_id: int, body: PersonUpdate, db: Db):
+        changes: dict = {}
+        if "display_name" in body.model_fields_set:
+            changes["display_name"] = body.display_name
+        if "notes" in body.model_fields_set:
+            changes["notes"] = body.notes
+        try:
+            return storage.update_person(db, person_id, **changes)
+        except ValueError as error:
+            raise _storage_error(error) from error
 
     @app.post("/api/v1/people/{person_id}/identities",
               response_model=PlatformIdentity, status_code=201)
