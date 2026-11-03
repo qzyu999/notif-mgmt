@@ -368,6 +368,13 @@ def add_identity(db: sqlite3.Connection, person_id: int, *, platform: str,
     if existing is not None:
         if existing["person_id"] not in (None, person_id):
             raise ValueError("Identity already linked to a different person")
+        if existing["person_id"] is None:
+            # Attaching an already-observed unresolved identity is a manual
+            # link, with the same signal/follow-up backfill as link_identity.
+            link_identity(db, existing["id"], person_id)
+            return PlatformIdentity(**dict(db.execute(
+                "SELECT * FROM identities WHERE id=?",
+                (existing["id"],)).fetchone()))
         return PlatformIdentity(**dict(existing))
     if db.execute("SELECT 1 FROM people WHERE id=?", (person_id,)).fetchone() is None:
         raise ValueError(f"Unknown person id {person_id}")
@@ -397,21 +404,34 @@ def get_or_create_identity(db: sqlite3.Connection, *, platform: str, identity_ki
 
 
 def link_identity(db: sqlite3.Connection, identity_id: int, person_id: int) -> None:
-    """Manual link: verify an identity against a person and backfill its signals."""
+    """Manual link: verify an identity against a person and backfill its signals.
+
+    Precedence (highest first): explicit user decisions, then exact identity
+    matches, then parser inference. A signal the user already assigned to a
+    person is an explicit decision and is never overwritten by this backfill;
+    only unassigned signals and follow-ups follow the identity. Linking an
+    identity already owned by a different person is rejected rather than
+    silently overwriting attribution.
+    """
     identity = db.execute("SELECT * FROM identities WHERE id=?", (identity_id,)).fetchone()
     person = db.execute("SELECT * FROM people WHERE id=?", (person_id,)).fetchone()
     if identity is None or person is None:
         raise ValueError("Unknown identity or person id")
+    if identity["person_id"] not in (None, person_id):
+        raise ValueError("Identity already linked to a different person")
     with db:
         db.execute(
             """UPDATE identities SET person_id=?, match_status='verified',
                match_method='manual', confidence=1.0,
                updated_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id=?""",
             (person_id, identity_id))
-        db.execute("UPDATE interaction_signals SET person_id=? WHERE identity_id=?",
-                   (person_id, identity_id))
         db.execute(
-            """UPDATE followups SET person_id=? WHERE signal_id IN
+            """UPDATE interaction_signals SET person_id=?
+               WHERE identity_id=? AND person_id IS NULL""",
+            (person_id, identity_id))
+        db.execute(
+            """UPDATE followups SET person_id=? WHERE person_id IS NULL
+               AND signal_id IN
                (SELECT id FROM interaction_signals WHERE identity_id=?)""",
             (person_id, identity_id))
 

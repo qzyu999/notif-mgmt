@@ -32,11 +32,28 @@ flowchart TD
 
 Schema is versioned with `PRAGMA user_version` (current: **3**); migrations preserve existing data (v1 `followups` rows are renamed to `followups_v1`, cursors are copied into `sync_state`, v3 rebuilds `inbound_events` account-scoped with foreign-key integrity verified).
 
-## Identity resolution (minimal, A1)
+## Identity resolution (minimal, A1; precedence hardened in A6-1)
+
+Attribution precedence, highest first:
+
+1. **Explicit user decisions** — a manual signal assignment or manual identity
+   link. These are user-confirmed and are never silently overwritten.
+2. **Exact identity match** — an incoming exact email/handle that already
+   belongs to a person attributes the new signal to that person.
+3. **Parser inference** — observed identities stay `unmatched` (method
+   `parser`), and display names stay actor candidates. Inference alone never
+   attributes anything to a person.
+
+Rules that follow from the precedence:
 
 1. **Unresolved** — exact identifiers (email/handle) are stored unmatched; display-name actors stay as `actor_candidate` on the signal.
 2. **Exact match** — if an incoming exact identifier already belongs to a person, the signal associates automatically.
-3. **Manual linking** — `link_identity` (identity → person, backfills signals/follow-ups) and `assign_signal_person` (name-only signal → person).
+3. **Manual linking** — `link_identity` (identity → person) backfills only
+   signals and follow-ups that have no person yet, so an earlier manual
+   signal assignment survives a later identity link. Linking an identity
+   already owned by a different person raises an error (the API maps it to
+   409) instead of overwriting attribution. Attaching an already-observed
+   unresolved identity through `add_identity` performs the same manual link.
 
 Deferred until needed: suggested matches, reversible merge workflows, cross-platform inference. Never match solely on display name.
 
